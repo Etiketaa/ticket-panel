@@ -1,0 +1,635 @@
+/* ==========================================================================
+   Dev Ticket Panel — reset + tokens + estilos
+   Tema único oscuro (la app es dark-only). Ningún color, espacio, radio ni
+   tipografía está hardcodeado en el JSX: todo sale de los tokens de :root.
+   ========================================================================== */
+
+:root {
+  color-scheme: dark;
+
+  /* --- Superficies (negro puro, sin tono azul) --------------------------- */
+  --bg: #050505;
+  --surface: #111111;
+  --surface-sunken: #050505;
+  --surface-elevated: #1a1a1a;
+  --surface-hover: #1e1e1e;
+  --surface-active: #2a2a2a;
+
+  /* --- Bordes ------------------------------------------------------------ */
+  /* --border: borde de componentes (cards, separadores). Necesita 3:1 vs fondo. */
+  /* --border-strong: bordes de controles activos (inputs, selects). */
+  --border: #333333;
+  --border-strong: #555555;
+  --on-strong: #ffffff;
+
+  /* --- Texto ------------------------------------------------------------- */
+  --text: #ffffff;
+  --text-bright: #e5e5eb;
+  --text-dim: #a1a1aa;
+  --text-muted: #71717a;
+
+  /* --- Neon (colores de acción, foco, estados) --------------------------- */
+  --neon-primary: #22d3ee;    /* cian — acciones primarias, foco, feature */
+  --neon-secondary: #a855f7;  /* violeta — mejoras, fullstack */
+  --neon-danger: #ef4444;     /* rojo — bugs, urgente, eliminar */
+  --neon-success: #22c55e;    /* verde — resuelto, cerrado */
+  --neon-soft-primary: rgba(34, 211, 238, 0.18);
+  --neon-soft-secondary: rgba(168, 85, 247, 0.18);
+  --neon-soft-danger: rgba(239, 68, 68, 0.18);
+  --neon-soft-success: rgba(34, 197, 94, 0.18);
+
+  /* --- Prioridad (pastel, texto oscuro sobre pastel, >= 4.5:1 sobre --bg) -- */
+  --prio-baja: #cbd5e1;
+  --prio-media: #fde047;
+  --prio-alta: #fbbf24;
+  --prio-urgente: #f87171;
+
+  /* --- Estado del ticket (pastel, escala propia) --------------------------- */
+  --estado-abierto: #a855f7;
+  --estado-en_progreso: #22c55e;
+  --estado-resuelto: #16a34a;
+  --estado-cerrado: #71717a;
+
+  /* --- Tipo de ticket (neon para badges de tipo) --------------------------- */
+  --type-bug: #ef4444;
+  --type-mejora: #a855f7;
+  --type-feature: #22d3ee;
+  --type-tarea: #71717a;
+
+  /* --- Overlay ----------------------------------------------------------- */
+  --scrim: rgba(5, 5, 5, 0.85);
+
+  /* --- Espaciado (escala 4/8) -------------------------------------------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* --- Tipografía -------------------------------------------------------- */
+  --font-xs: 11px;
+  --font-sm: 12px;
+  --font-md: 13px;
+  --font-base: 14px;
+  --font-lg: 16px;
+  --font-xl: 20px;
+
+  /* --- Forma y movimiento ------------------------------------------------ */
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --dur: 150ms;
+  --font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: var(--font-base) / 1.55 var(--font);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100svh;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  color: var(--text);
+}
+
+:focus-visible {
+  outline: 2px solid var(--neon-primary);
+  outline-offset: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ==========================================================================
+   Layout
+   ========================================================================== */
+
+.layout {
+  display: flex;
+  min-height: 100svh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+}
+
+.sidebar {
+  width: 260px;
+  flex: 0 0 260px;
+  padding: var(--space-5);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  background: var(--surface);
+}
+
+.sidebar-title {
+  font-size: var(--font-xl);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.sidebar-sub {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-md);
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-6);
+  overflow-y: auto;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* ==========================================================================
+   Controles
+   ========================================================================== */
+
+.label {
+  display: block;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: var(--space-1);
+}
+
+.input,
+.select {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: var(--font-base);
+  transition:
+    border-color var(--dur) ease,
+    box-shadow var(--dur) ease;
+}
+
+.select {
+  font-size: var(--font-md);
+  padding: var(--space-2) var(--space-2);
+}
+
+.input:focus,
+.select:focus {
+  outline: none;
+  border-color: var(--neon-primary);
+  box-shadow: 0 0 0 3px var(--neon-soft-primary);
+}
+
+.input::placeholder {
+  color: var(--text-muted);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  background: var(--neon-primary);
+  color: var(--text);
+  border: 1px solid transparent;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: var(--font-base);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    filter var(--dur) ease,
+    opacity var(--dur) ease,
+    transform var(--dur) ease,
+    background-color var(--dur) ease;
+}
+
+.btn:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.btn-secondary {
+  background: var(--border-strong);
+  color: var(--on-strong);
+}
+
+.btn-danger {
+  background: var(--danger);
+  color: var(--on-danger);
+}
+
+.btn-ghost {
+  background: var(--surface);
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: var(--font-lg);
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    color var(--dur) ease,
+    background-color var(--dur) ease;
+}
+
+.icon-btn:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+/* ==========================================================================
+   Feedback
+   ========================================================================== */
+
+.alert {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  font-size: var(--font-md);
+  border: 1px solid var(--neon-danger);
+  background: var(--neon-soft-danger);
+  color: var(--text);
+}
+
+.alert-info {
+  border-color: var(--border-strong);
+  background: var(--surface);
+  color: var(--text-dim);
+}
+
+.empty {
+  color: var(--text-muted);
+  font-size: var(--font-md);
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.empty strong {
+  display: block;
+  color: var(--text);
+  font-size: var(--font-base);
+  margin-bottom: var(--space-1);
+}
+
+.spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ==========================================================================
+   Lista de tickets
+   ========================================================================== */
+
+.ticket-card {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color var(--dur) ease,
+    border-color var(--dur) ease;
+}
+
+.ticket-card:hover {
+  background: var(--surface-hover);
+}
+
+.ticket-card[aria-current='true'] {
+  background: var(--surface-active);
+  border-color: var(--neon-primary);
+}
+
+.ticket-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.ticket-title {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.ticket-status {
+  flex: 0 0 auto;
+  font-size: var(--font-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.ticket-meta {
+  margin-top: var(--space-1);
+  font-size: var(--font-sm);
+  color: var(--text-muted);
+}
+
+.ticket-desc {
+  margin-top: var(--space-2);
+  font-size: var(--font-sm);
+  color: var(--text-dim);
+  white-space: pre-wrap;
+}
+
+/* ==========================================================================
+   Modal
+   ========================================================================== */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: var(--scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+}
+
+.modal {
+  width: 100%;
+  max-width: 640px;
+  max-height: 90vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+}
+
+.modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.modal-title {
+  font-size: var(--font-xl);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.badge {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.modal-desc {
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  margin: var(--space-3) 0 0;
+}
+
+.modal-actions {
+  margin-top: var(--space-4);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.modal-actions .select {
+  width: auto;
+  min-width: 160px;
+}
+
+.comments-title {
+  color: var(--text);
+  font-size: var(--font-base);
+  margin: var(--space-5) 0 var(--space-2);
+}
+
+.comments {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.comment {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+}
+
+.comment-meta {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.comment-body {
+  color: var(--text-bright);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.composer {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  align-items: flex-end;
+}
+
+.composer .input {
+  resize: vertical;
+  min-height: 64px;
+  font-family: inherit;
+}
+
+.composer-hint {
+  margin-top: var(--space-1);
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+}
+
+/* ==========================================================================
+   Login
+   ========================================================================== */
+
+.login-wrap {
+  min-height: 100svh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  padding: var(--space-4);
+}
+
+.login-card {
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-8);
+}
+
+.login-title {
+  font-size: var(--font-xl);
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+
+.login-sub {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-md);
+}
+
+/* ==========================================================================
+   Sidebar — filtros y estado
+   ========================================================================== */
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.filters .select {
+  width: auto;
+  flex: 1 1 140px;
+}
+
+.sidebar-status {
+  margin-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--font-sm);
+  color: var(--text-muted);
+}
+
+.sidebar-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.sidebar-footer {
+  margin-top: var(--space-6);
+}
+
+.project-url {
+  margin-top: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  overflow-wrap: anywhere;
+}
+
+/* Pensado para verse en la compu: layout de escritorio, sin breakpoints. */
