@@ -601,8 +601,9 @@ h3 {
 }
 
 .filters .select {
-  width: auto;
-  flex: 1 1 140px;
+  width: 100%;
+  flex: 1 1 calc(50% - var(--space-1));
+  min-width: 120px;
 }
 
 .sidebar-status {
