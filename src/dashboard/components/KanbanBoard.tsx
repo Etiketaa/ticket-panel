@@ -154,11 +154,11 @@ export function KanbanBoard({ tickets, onTicketClick, onStatusChange }: KanbanBo
                       }}
                     >
                       <div className="kanban-card-header">
-                        <span className="kanban-card-type" style={{ color: TYPE_COLOR[ticket.type] }}>
-                          {TYPE_LABEL[ticket.type] ?? ticket.type}
+                        <span className="kanban-card-type" style={{ color: TYPE_COLOR[ticket.type] || 'var(--text-muted)' }}>
+                          {(TYPE_LABEL[ticket.type] ?? ticket.type) || 'Sin tipo'}
                         </span>
-                        <span className="kanban-card-priority" style={{ color: ticket.priority === 'baja' ? 'var(--prio-baja)' : ticket.priority === 'media' ? 'var(--prio-media)' : ticket.priority === 'alta' ? 'var(--prio-alta)' : 'var(--prio-urgente)' }}>
-                          {PRIORITY_LABEL[ticket.priority] ?? ticket.priority}
+                        <span className="kanban-card-priority" style={{ color: ticket.priority ? `var(--prio-${ticket.priority})` : 'var(--text-muted)' }}>
+                          {ticket.priority ? PRIORITY_LABEL[ticket.priority] : 'Sin prioridad'}
                         </span>
                       </div>
                       <h4 className="kanban-card-title">{ticket.title}</h4>
