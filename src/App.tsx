@@ -758,23 +758,37 @@ export default function App() {
                         openTicket(t);
                       }
                     }}
-                    style={{ borderLeft: `4px solid ${PRIORITY_COLOR[t.priority]}` }}
+                    style={{
+                      borderLeft: `4px solid ${
+                        t.priority && PRIORITY_COLOR[t.priority]
+                          ? PRIORITY_COLOR[t.priority]
+                          : 'var(--border)'
+                      }`,
+                    }}
                   >
                     <div className="ticket-head">
-                      <span className="ticket-title">{t.title}</span>
-                      <span className="ticket-status" style={{ color: STATUS_COLOR[t.status] }}>
-                        {STATUS_LABEL[t.status] ?? t.status}
+                      <span className="ticket-title">{t.title || 'Sin título'}</span>
+                      <span
+                        className="ticket-status"
+                        style={{ color: STATUS_COLOR[t.status] || 'var(--text-muted)' }}
+                      >
+                        {(STATUS_LABEL[t.status] ?? t.status) || 'Sin estado'}
                       </span>
-                      <span className="badge" style={{ color: TYPE_COLOR[t.type] }}>
-                        {TYPE_LABEL[t.type] ?? t.type}
+                      <span
+                        className="badge"
+                        style={{ color: TYPE_COLOR[t.type] || 'var(--text-muted)' }}
+                      >
+                        {(TYPE_LABEL[t.type] ?? t.type) || 'Sin tipo'}
                       </span>
                     </div>
                     <div className="ticket-meta">
-                      {t.created_by_name || 'operador'} · {formatDate(t.created_at)} · {t.category}
+                      {t.created_by_name || 'operador'} · {formatDate(t.created_at)} · {
+                        t.category || 'Sin categoría'
+                      }
                     </div>
                     <div className="ticket-desc">
-                      {t.description.slice(0, 120)}
-                      {t.description.length > 120 ? '…' : ''}
+                      {(t.description || '').slice(0, 120)}
+                      {(t.description || '').length > 120 ? '…' : ''}
                     </div>
                   </div>
                 ))}
@@ -809,16 +823,25 @@ export default function App() {
             </div>
 
             <div className="badges">
-              <span className="badge" style={{ color: PRIORITY_COLOR[selected.priority] }}>
-                Prioridad: {selected.priority}
+              <span
+                className="badge"
+                style={{ color: PRIORITY_COLOR[selected.priority] || 'var(--text-muted)' }}
+              >
+                Prioridad: {selected.priority || 'Sin prioridad'}
               </span>
-              <span className="badge" style={{ color: STATUS_COLOR[selected.status] }}>
-                Estado: {STATUS_LABEL[selected.status] ?? selected.status}
+              <span
+                className="badge"
+                style={{ color: STATUS_COLOR[selected.status] || 'var(--text-muted)' }}
+              >
+                Estado: {(STATUS_LABEL[selected.status] ?? selected.status) || 'Sin estado'}
               </span>
-              <span className="badge" style={{ color: TYPE_COLOR[selected.type] }}>
-                Tipo: {TYPE_LABEL[selected.type] ?? selected.type}
+              <span
+                className="badge"
+                style={{ color: TYPE_COLOR[selected.type] || 'var(--text-muted)' }}
+              >
+                Tipo: {(TYPE_LABEL[selected.type] ?? selected.type) || 'Sin tipo'}
               </span>
-              <span className="badge">Categoría: {selected.category}</span>
+              <span className="badge">Categoría: {selected.category || 'Sin categoría'}</span>
               <span className="badge">Por: {selected.created_by_name || 'operador'}</span>
             </div>
 

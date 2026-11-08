@@ -85,6 +85,7 @@ function buildAreaSeries(tickets: Ticket[]): AreaSeries[] {
     buckets[key] = { creados: 0, resueltos: 0 };
   }
   for (const t of tickets) {
+    if (!t.created_at) continue;
     const bucketKey = new Date(t.created_at).toISOString();
     if (buckets[bucketKey]) buckets[bucketKey].creados += 1;
     if (t.resolved_at) {
@@ -113,7 +114,11 @@ function buildAreaSeries(tickets: Ticket[]): AreaSeries[] {
 
 function buildBars(tickets: Ticket[]): BarItem[] {
   const counts: Record<Priority, number> = { baja: 0, media: 0, alta: 0, urgente: 0 };
-  for (const t of tickets) counts[t.priority] += 1;
+  for (const t of tickets) {
+    if (t.priority && counts[t.priority] !== undefined) {
+      counts[t.priority] += 1;
+    }
+  }
   return [
     { label: 'Baja', value: counts.baja, color: 'var(--prio-baja)' },
     { label: 'Media', value: counts.media, color: 'var(--prio-media)' },
@@ -229,7 +234,7 @@ export default function DashboardView(props: DashboardViewProps) {
 
   const times = filtered
     .map((t) => resolveMinutes(t.created_at, t.resolved_at))
-    .filter((v): v is number => v !== null);
+    .filter((v): v is number => v !== null && Number.isFinite(v));
   const promedio = times.length ? Math.round(times.reduce((a, b) => a + b, 0) / times.length) : null;
 
   const kpis: KPI[] = [
