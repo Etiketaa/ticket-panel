@@ -6,6 +6,10 @@
  *
  * Stack: solo React + TypeScript + CSS nativo. Sin librerías de gráficos
  * ni de animación. Todo el color vive en los tokens de src/index.css.
+ *
+ * Toda la lectura de propiedades de tickets es defensiva: nunca se asume
+ * que un campo existe. Los tickets de gesope pueden no tener type, priority,
+ * category, created_at, resolved_at, description, created_by_name, etc.
  */
 import { useMemo } from 'react';
 import { AreaChart } from './AreaChart';
@@ -15,16 +19,19 @@ import type { AreaSeries, BarItem, ChartPoint, KPI } from '../types';
 
 type Status = 'abierto' | 'en_progreso' | 'resuelto' | 'cerrado';
 type Priority = 'baja' | 'media' | 'alta' | 'urgente';
+type TicketType = 'bug' | 'mejora' | 'feature' | 'tarea';
 
 type Ticket = {
   id: string;
   title: string;
-  priority: Priority;
-  status: Status;
-  type: 'bug' | 'mejora' | 'feature' | 'tarea';
-  category: string;
-  created_at: string;
-  resolved_at: string | null;
+  priority?: Priority | null | undefined;
+  status: Status | null | undefined;
+  type?: TicketType | null | undefined;
+  category?: string | null | undefined;
+  created_at?: string | null | undefined;
+  resolved_at?: string | null | undefined;
+  description?: string | null | undefined;
+  created_by_name?: string | null | undefined;
 };
 
 type Project = {
@@ -46,14 +53,29 @@ type DashboardViewProps = {
   onPriorityFilterChange: (priority: string) => void;
 };
 
-const STATUS_LABEL: Record<Status, string> = {
+const STATUS_LABEL: Record<string, string> = {
   abierto: 'Abierto',
   en_progreso: 'En progreso',
   resuelto: 'Resuelto',
   cerrado: 'Cerrado',
 };
 
-function fmtDate(iso: string): string {
+const PRIORITY_LABEL: Record<string, string> = {
+  baja: 'Baja',
+  media: 'Media',
+  alta: 'Alta',
+  urgente: 'Urgente',
+};
+
+const PRIORITY_COLOR: Record<string, string> = {
+  baja: 'var(--prio-baja)',
+  media: 'var(--prio-media)',
+  alta: 'var(--prio-alta)',
+  urgente: 'var(--prio-urgente)',
+};
+
+function fmtDate(iso?: string | null): string {
+  if (!iso) return '—';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleString('es-AR', {
@@ -66,9 +88,12 @@ function fmtDate(iso: string): string {
   });
 }
 
-function resolveMinutes(created: string, resolved: string | null): number | null {
-  if (!resolved) return null;
-  return (new Date(resolved).getTime() - new Date(created).getTime()) / 1000 / 60;
+function resolveMinutes(created?: string | null, resolved?: string | null): number | null {
+  if (!created || !resolved) return null;
+  const createdTime = new Date(created).getTime();
+  const resolvedTime = new Date(resolved).getTime();
+  if (Number.isNaN(createdTime) || Number.isNaN(resolvedTime)) return null;
+  return (resolvedTime - createdTime) / 1000 / 60;
 }
 
 /* ------------------------------------------------------------------ */
@@ -113,7 +138,7 @@ function buildAreaSeries(tickets: Ticket[]): AreaSeries[] {
 }
 
 function buildBars(tickets: Ticket[]): BarItem[] {
-  const counts: Record<Priority, number> = { baja: 0, media: 0, alta: 0, urgente: 0 };
+  const counts: Record<string, number> = { baja: 0, media: 0, alta: 0, urgente: 0 };
   for (const t of tickets) {
     if (t.priority && counts[t.priority] !== undefined) {
       counts[t.priority] += 1;
@@ -126,9 +151,6 @@ function buildBars(tickets: Ticket[]): BarItem[] {
     { label: 'Urgente', value: counts.urgente, color: 'var(--prio-urgente)' },
   ];
 }
-
-
-
 
 /* ------------------------------------------------------------------ */
 /* Sub-componentos de estado                                          */
@@ -219,6 +241,7 @@ export default function DashboardView(props: DashboardViewProps) {
 
   const activeProject = projects.find((p) => p.id === projectId) || null;
 
+  // Filtrado defensivo: nunca asume que los campos existen
   const filtered = useMemo(() => {
     return tickets.filter((t) => {
       if (statusFilter !== 'all' && t.status !== statusFilter) return false;
@@ -242,7 +265,11 @@ export default function DashboardView(props: DashboardViewProps) {
     { title: 'Abiertos', value: abiertos, color: 'var(--neon-primary)' },
     { title: 'En progreso', value: enProgreso, color: 'var(--prio-media)' },
     { title: 'Resueltos', value: resueltos, color: 'var(--success)' },
-    { title: 'Cerrados', value: total - abiertos - enProgreso - resueltos, color: 'var(--text-muted)' },
+    {
+      title: 'Cerrados',
+      value: total - abiertos - enProgreso - resueltos,
+      color: 'var(--text-muted)',
+    },
     {
       title: 'Prom. resolución',
       value: promedio === null ? '—' : `${promedio} min`,
@@ -282,7 +309,7 @@ export default function DashboardView(props: DashboardViewProps) {
                 onClick={() => onProjectChange(pr.id)}
               >
                 <span className="project-dot" aria-hidden="true"></span>
-                {pr.name}
+                {pr.name || 'Sin nombre'}
               </button>
             );
           })}
@@ -300,7 +327,7 @@ export default function DashboardView(props: DashboardViewProps) {
             >
               {projects.map((pr) => (
                 <option key={pr.id} value={pr.id}>
-                  {pr.name}
+                  {pr.name || 'Sin nombre'}
                 </option>
               ))}
             </select>
@@ -371,36 +398,35 @@ export default function DashboardView(props: DashboardViewProps) {
           <div className="list">
             {filtered.slice(0, 8).map((t) => (
               <div
-                key={t.id}
+                key={t.id || Math.random().toString(36).slice(2)}
                 className="list-item"
                 style={{
                   borderLeft: `3px solid ${
-                    t.status === 'abierto'
-                      ? 'var(--estado-abierto)'
-                      : t.status === 'en_progreso'
-                        ? 'var(--estado-en_progreso)'
-                        : t.status === 'resuelto'
-                          ? 'var(--estado-resuelto)'
-                          : 'var(--estado-cerrado)'
+                    t.priority && PRIORITY_COLOR[t.priority]
+                      ? PRIORITY_COLOR[t.priority]
+                      : 'var(--border)'
                   }`,
                 }}
               >
-                <div className="list-title">{t.title}</div>
+                <div className="list-title">{t.title || 'Sin título'}</div>
                 <div className="list-meta">
                   <span
                     className="badge"
                     style={{
-                      backgroundColor: `var(--prio-${t.priority})`,
+                      backgroundColor:
+                        t.priority && PRIORITY_COLOR[t.priority]
+                          ? PRIORITY_COLOR[t.priority]
+                          : 'var(--border)',
                       color: 'var(--bg)',
                     }}
                   >
-                    {t.priority}
+                    {t.priority ? PRIORITY_LABEL[t.priority] : 'Sin prioridad'}
                   </span>
                   <span
                     className="badge"
                     style={{ backgroundColor: 'var(--surface-hover)', color: 'var(--text)' }}
                   >
-                    {STATUS_LABEL[t.status]}
+                    {t.status ? STATUS_LABEL[t.status] || t.status : 'Sin estado'}
                   </span>
                   <span>{fmtDate(t.created_at)}</span>
                 </div>
