@@ -21,7 +21,7 @@ import { useMemo } from 'react';
 import type { Ticket } from '../../App';
 
 type KanbanColumn = {
-  id: Ticket['status'];
+  id: string;
   label: string;
   color: string;
 };
@@ -52,6 +52,13 @@ const PRIORITY_LABEL: Record<string, string> = {
   media: 'Media',
   alta: 'Alta',
   urgente: 'Urgente',
+};
+
+const PRIORITY_COLOR: Record<string, string> = {
+  baja: 'var(--prio-baja)',
+  media: 'var(--prio-media)',
+  alta: 'var(--prio-alta)',
+  urgente: 'var(--prio-urgente)',
 };
 
 interface KanbanBoardProps {
@@ -85,13 +92,14 @@ export function KanbanBoard({ tickets, onTicketClick, onStatusChange }: KanbanBo
 
   const moveTicket = (ticketId: string, direction: 'prev' | 'next') => {
     const ticket = tickets.find((t) => t.id === ticketId);
-    if (!ticket) return;
-    const currentIdx = COLUMNS.findIndex((c) => c.id === ticket.status);
+    if (!ticket || ticket.status === null || ticket.status === undefined) return;
+    const ticketStatus: Ticket['status'] = ticket.status;
+    const currentIdx = COLUMNS.findIndex((c) => c.id === ticketStatus);
     const nextIdx =
       direction === 'prev'
         ? Math.max(0, currentIdx - 1)
         : Math.min(COLUMNS.length - 1, currentIdx + 1);
-    const newStatus = COLUMNS[nextIdx].id;
+    const newStatus = COLUMNS[nextIdx].id as Ticket['status'];
     if (newStatus !== ticket.status) {
       onStatusChange(ticketId, newStatus);
     }
@@ -143,29 +151,34 @@ export function KanbanBoard({ tickets, onTicketClick, onStatusChange }: KanbanBo
                       }}
                       style={{
                         borderLeft: `4px solid ${
-                          ticket.priority === 'baja'
-                            ? 'var(--prio-baja)'
-                            : ticket.priority === 'media'
-                              ? 'var(--prio-media)'
-                              : ticket.priority === 'alta'
-                                ? 'var(--prio-alta)'
-                                : 'var(--prio-urgente)'
+                          safeGet(PRIORITY_COLOR, ticket.priority) || 'var(--border)'
                         }`,
                       }}
                     >
                       <div className="kanban-card-header">
-                        <span className="kanban-card-type" style={{ color: TYPE_COLOR[ticket.type] || 'var(--text-muted)' }}>
-                          {(TYPE_LABEL[ticket.type] ?? ticket.type) || 'Sin tipo'}
+                        <span
+                          className="kanban-card-type"
+                          style={{ color: safeGet(TYPE_COLOR, ticket.type) || 'var(--text-muted)' }}
+                        >
+                          {(safeGet(TYPE_LABEL, ticket.type) ?? ticket.type) || 'Sin tipo'}
                         </span>
-                        <span className="kanban-card-priority" style={{ color: ticket.priority ? `var(--prio-${ticket.priority})` : 'var(--text-muted)' }}>
+                        <span
+                          className="kanban-card-priority"
+                          style={{
+                            color:
+                              ticket.priority && PRIORITY_COLOR[ticket.priority]
+                                ? PRIORITY_COLOR[ticket.priority]
+                                : 'var(--text-muted)',
+                          }}
+                        >
                           {ticket.priority ? PRIORITY_LABEL[ticket.priority] : 'Sin prioridad'}
                         </span>
                       </div>
-                      <h4 className="kanban-card-title">{ticket.title}</h4>
+                      <h4 className="kanban-card-title">{ticket.title || 'Sin título'}</h4>
                       <div className="kanban-card-meta">
-                        <span className="kanban-card-category">{ticket.category}</span>
+                        <span className="kanban-card-category">{ticket.category || 'Sin categoría'}</span>
                         <span className="kanban-card-author">{ticket.created_by_name || 'operador'}</span>
-                        <span className="kanban-card-date">{new Date(ticket.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })}</span>
+                        <span className="kanban-card-date">{fmtDate(ticket.created_at)}</span>
                       </div>
                       <div className="kanban-card-actions">
                         <button
@@ -203,4 +216,22 @@ export function KanbanBoard({ tickets, onTicketClick, onStatusChange }: KanbanBo
       </div>
     </section>
   );
+}
+
+function safeGet<T extends string | number | symbol, V>(
+  map: Record<T, V>,
+  key: T | null | undefined,
+): V | undefined {
+  if (key === null || key === undefined) return undefined;
+  return map[key];
+}
+
+function fmtDate(iso?: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('es-AR', {
+    day: '2-digit',
+    month: '2-digit',
+  });
 }

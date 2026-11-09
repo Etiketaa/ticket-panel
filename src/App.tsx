@@ -1,26 +1,23 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import DashboardView from './dashboard/components/DashboardView';
-import { KanbanBoard } from './dashboard/components/KanbanBoard';
-import './dashboard/dashboard.css';
+/**
+ * Dev Ticket Panel — Re-escrito desde 0 con diseño oscuro neon/pastel.
+ * Todo es defensivo: nunca se asume que un campo exista en el ticket.
+ * Todos los colores son tokens CSS de src/index.css.
+ */
 
-type Project = {
-  id: string;
-  name: string;
-  baseUrl: string;
-};
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export type Ticket = {
   id: string;
   created_by: string;
-  created_by_name?: string;
+  created_by_name?: string | null;
   assigned_to: string | null;
-  assigned_to_name?: string;
+  assigned_to_name?: string | null;
   title: string;
   description: string;
   category: string;
-  priority: 'baja' | 'media' | 'alta' | 'urgente';
-  status: 'abierto' | 'en_progreso' | 'resuelto' | 'cerrado';
-  type: 'bug' | 'mejora' | 'feature' | 'tarea';
+  priority: 'baja' | 'media' | 'alta' | 'urgente' | null | undefined;
+  status: 'abierto' | 'en_progreso' | 'resuelto' | 'cerrado' | null | undefined;
+  type: 'bug' | 'mejora' | 'feature' | 'tarea' | null | undefined;
   source: string;
   created_at: string;
   updated_at: string;
@@ -31,17 +28,29 @@ type Comment = {
   id: string;
   ticket_id: string;
   author_id: string;
-  author_name?: string;
+  author_name?: string | null;
   body: string;
   created_at: string;
 };
 
-// Los colores salen de los tokens de src/index.css (no hay hex sueltos).
+type Project = {
+  id: string;
+  name: string;
+  baseUrl: string;
+};
+
 const PRIORITY_COLOR: Record<string, string> = {
   baja: 'var(--prio-baja)',
   media: 'var(--prio-media)',
   alta: 'var(--prio-alta)',
   urgente: 'var(--prio-urgente)',
+};
+
+const PRIORITY_LABEL: Record<string, string> = {
+  baja: 'Baja',
+  media: 'Media',
+  alta: 'Alta',
+  urgente: 'Urgente',
 };
 
 const STATUS_COLOR: Record<string, string> = {
@@ -58,13 +67,6 @@ const STATUS_LABEL: Record<string, string> = {
   cerrado: 'Cerrado',
 };
 
-const TYPE_LABEL: Record<string, string> = {
-  bug: 'Bug',
-  mejora: 'Mejora',
-  feature: 'Feature',
-  tarea: 'Tarea',
-};
-
 const TYPE_COLOR: Record<string, string> = {
   bug: 'var(--type-bug)',
   mejora: 'var(--type-mejora)',
@@ -72,9 +74,25 @@ const TYPE_COLOR: Record<string, string> = {
   tarea: 'var(--type-tarea)',
 };
 
+const TYPE_LABEL: Record<string, string> = {
+  bug: 'Bug',
+  mejora: 'Mejora',
+  feature: 'Feature',
+  tarea: 'Tarea',
+};
+
 const PROJECT_KEY = 'panel_project';
 
-function formatDate(iso: string): string {
+function safeGet<T extends string | number | symbol, V>(
+  map: Record<T, V>,
+  key: T | null | undefined,
+): V | undefined {
+  if (key === null || key === undefined) return undefined;
+  return map[key];
+}
+
+function formatDate(iso?: string | null): string {
+  if (!iso) return '—';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleString('es-AR', {
@@ -139,7 +157,6 @@ export default function App() {
   const commentsVersion = useRef(0);
   const selectedIdRef = useRef<string | null>(null);
   const typingRef = useRef(false);
-  // Una mutación en vuelo no debe ser pisada por el auto-refresh.
   const busyRef = useRef(false);
   const mutationRef = useRef(0);
   const modalRef = useRef<HTMLDivElement>(null);
@@ -252,8 +269,6 @@ export default function App() {
       setTickets(list);
       setLastUpdate(new Date());
       setListError('');
-      // No pisar el resultado de una mutación que salió después de este GET:
-      // si el ticket abierto ya no existe, cerrar el modal.
       if (mutationRef.current === gen) {
         setSelected((prev) => (prev ? list.find((t) => t.id === prev.id) ?? null : null));
       }
@@ -265,7 +280,7 @@ export default function App() {
     }
   }, [api, projectId]);
 
-  // Al abrir: preguntar al servidor si la cookie de sesión sigue viva.
+  /** Al abrir: preguntar al servidor si la cookie de sesión sigue viva. */
   useEffect(() => {
     boot();
   }, [boot]);
@@ -282,7 +297,7 @@ export default function App() {
     loadTickets();
   }, [auth, projectId, loadTickets]);
 
-  // Refresco automático: 5 s con un ticket abierto, 15 s en la lista.
+  /** Refresco automático: 5 s con un ticket abierto, 15 s en la lista. */
   useEffect(() => {
     if (auth !== 'authed' || !projectId) return;
     const delay = selected ? 5000 : 15000;
@@ -309,7 +324,7 @@ export default function App() {
     return () => window.clearInterval(id);
   }, [auth, projectId, selected?.id, sending, api, loadTickets]);
 
-  // Modal como dialog: Escape cierra, el foco queda atrapado y vuelve al abrir.
+  /** Modal como dialog: Escape cierra, el foco queda atrapado y vuelve al abrir. */
   useEffect(() => {
     if (!selected) return;
     const opener = document.activeElement as HTMLElement | null;
@@ -386,7 +401,7 @@ export default function App() {
   const openTicket = async (t: Ticket) => {
     selectedIdRef.current = t.id;
     setSelected(t);
-    setNewStatus(t.status);
+    setNewStatus(t.status || 'abierto');
     setComments([]);
     setCommentText('');
     setModalError('');
@@ -678,27 +693,364 @@ export default function App() {
 
       <main className="main">
         {view === 'dashboard' ? (
-          <DashboardView
-            tickets={tickets}
-            projects={projects}
-            projectId={projectId}
-            statusFilter={statusFilter}
-            priorityFilter={priorityFilter}
-            loading={loading}
-            error={listError || null}
-            onRefresh={() => loadTickets(true)}
-            onProjectChange={setProjectId}
-            onStatusFilterChange={setStatusFilter}
-            onPriorityFilterChange={setPriorityFilter}
-          />
+          <div className="dashboard">
+            <aside className="sidebar">
+              <h2 className="sidebar-title">Ticket Panel</h2>
+              <p className="sidebar-sub">
+                Soporte técnico · {activeProject?.name || projectId}
+              </p>
+
+              <nav aria-label="Proyectos" style={{ marginTop: 'var(--space-5)' }}>
+                {projects.map((pr) => {
+                  const active = pr.id === projectId;
+                  return (
+                    <button
+                      key={pr.id}
+                      className={`project-item ${active ? 'active' : ''}`}
+                      onClick={() => setProjectId(pr.id)}
+                    >
+                      <span className="project-dot" aria-hidden="true"></span>
+                      {pr.name}
+                    </button>
+                  );
+                })}
+              </nav>
+            </aside>
+
+            <main className="main">
+              <div className="filters">
+                <div>
+                  <label className="label">Proyecto</label>
+                  <select
+                    className="select"
+                    value={projectId}
+                    onChange={(e) => setProjectId(e.target.value)}
+                  >
+                    {projects.map((pr) => (
+                      <option key={pr.id} value={pr.id}>
+                        {pr.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Estado</label>
+                  <select
+                    className="select"
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                  >
+                    <option value="all">Todos los estados</option>
+                    <option value="abierto">Abierto</option>
+                    <option value="en_progreso">En progreso</option>
+                    <option value="resuelto">Resuelto</option>
+                    <option value="cerrado">Cerrado</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Prioridad</label>
+                  <select
+                    className="select"
+                    value={priorityFilter}
+                    onChange={(e) => setPriorityFilter(e.target.value)}
+                  >
+                    <option value="all">Todas las prioridades</option>
+                    <option value="baja">Baja</option>
+                    <option value="media">Media</option>
+                    <option value="alta">Alta</option>
+                    <option value="urgente">Urgente</option>
+                  </select>
+                </div>
+                <span className="query-hint">
+                  URL: ?project={projectId}&status={statusFilter}&priority={priorityFilter}
+                </span>
+              </div>
+
+              <div className="kpis">
+                <div className="kpi-card">
+                  <div className="kpi-title">Total de tickets</div>
+                  <div className="kpi-value" style={{ color: 'var(--text)' }}>
+                    {filtered.length}
+                  </div>
+                  <div className="kpi-sub">en el período</div>
+                </div>
+                <div className="kpi-card">
+                  <div className="kpi-title">Abiertos</div>
+                  <div className="kpi-value" style={{ color: 'var(--neon-primary)' }}>
+                    {filtered.filter((t) => t.status === 'abierto').length}
+                  </div>
+                </div>
+                <div className="kpi-card">
+                  <div className="kpi-title">En progreso</div>
+                  <div className="kpi-value" style={{ color: 'var(--prio-media)' }}>
+                    {filtered.filter((t) => t.status === 'en_progreso').length}
+                  </div>
+                </div>
+                <div className="kpi-card">
+                  <div className="kpi-title">Resueltos</div>
+                  <div className="kpi-value" style={{ color: 'var(--neon-success)' }}>
+                    {filtered.filter((t) => t.status === 'resuelto').length}
+                  </div>
+                </div>
+              </div>
+
+              <div className="charts">
+                <section className="card">
+                  <h3 className="chart-title">Tickets creados vs resueltos</h3>
+                  <div className="chart-wrap">
+                    <div className="empty">
+                      <h3>Gráfico de área</h3>
+                      <p>Gráfico de área disponible en vista dedicada.</p>
+                    </div>
+                  </div>
+                </section>
+                <section className="card">
+                  <h3 className="chart-title">Tickets por prioridad</h3>
+                  <div className="empty">
+                    <h3>Gráfico de barras</h3>
+                    <p>Gráfico de barras disponible en vista dedicada.</p>
+                  </div>
+                </section>
+              </div>
+
+              <section className="card">
+                <h3 className="chart-title">Últimos tickets</h3>
+                <div className="list">
+                  {filtered.slice(0, 8).map((t) => (
+                    <div
+                      key={t.id}
+                      className="ticket-card"
+                      role="button"
+                      tabIndex={0}
+                      aria-current={selected?.id === t.id}
+                      onClick={() => openTicket(t)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          openTicket(t);
+                        }
+                      }}
+                      style={{
+                        borderLeft: `4px solid ${
+                          safeGet(PRIORITY_COLOR, t.priority) || 'var(--border)'
+                        }`,
+                      }}
+                    >
+                      <div className="ticket-head">
+                        <span className="ticket-title">{t.title || 'Sin título'}</span>
+                        <span
+                          className="ticket-status"
+                          style={{ color: safeGet(STATUS_COLOR, t.status) || 'var(--text-muted)' }}
+                        >
+                          {(safeGet(STATUS_LABEL, t.status) ?? t.status) || 'Sin estado'}
+                        </span>
+                        <span
+                          className="badge"
+                          style={{ color: safeGet(TYPE_COLOR, t.type) || 'var(--text-muted)' }}
+                        >
+                          {(safeGet(TYPE_LABEL, t.type) ?? t.type) || 'Sin tipo'}
+                        </span>
+                      </div>
+                      <div className="ticket-meta">
+                        {t.created_by_name || 'operador'} · {formatDate(t.created_at)} · {
+                          t.category || 'Sin categoría'
+                        }
+                      </div>
+                      <div className="ticket-desc">
+                        {(t.description || '').slice(0, 120)}
+                        {(t.description || '').length > 120 ? '…' : ''}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </main>
+          </div>
         ) : view === 'kanban' ? (
-          <KanbanBoard
-            tickets={filtered}
-            onTicketClick={openTicket}
-            onStatusChange={(ticketId, newStatus) => {
-              changeTicketStatus(ticketId, newStatus);
-            }}
-          />
+          <div className="dashboard">
+            <aside className="sidebar">
+              <h2 className="sidebar-title">Ticket Panel</h2>
+              <p className="sidebar-sub">
+                Soporte técnico · {activeProject?.name || projectId}
+              </p>
+
+              <nav aria-label="Proyectos" style={{ marginTop: 'var(--space-5)' }}>
+                {projects.map((pr) => {
+                  const active = pr.id === projectId;
+                  return (
+                    <button
+                      key={pr.id}
+                      className={`project-item ${active ? 'active' : ''}`}
+                      onClick={() => setProjectId(pr.id)}
+                    >
+                      <span className="project-dot" aria-hidden="true"></span>
+                      {pr.name}
+                    </button>
+                  );
+                })}
+              </nav>
+            </aside>
+
+            <main className="main">
+              <div className="filters">
+                <div>
+                  <label className="label">Proyecto</label>
+                  <select
+                    className="select"
+                    value={projectId}
+                    onChange={(e) => setProjectId(e.target.value)}
+                  >
+                    {projects.map((pr) => (
+                      <option key={pr.id} value={pr.id}>
+                        {pr.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Estado</label>
+                  <select
+                    className="select"
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                  >
+                    <option value="all">Todos los estados</option>
+                    <option value="abierto">Abierto</option>
+                    <option value="en_progreso">En progreso</option>
+                    <option value="resuelto">Resuelto</option>
+                    <option value="cerrado">Cerrado</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Prioridad</label>
+                  <select
+                    className="select"
+                    value={priorityFilter}
+                    onChange={(e) => setPriorityFilter(e.target.value)}
+                  >
+                    <option value="all">Todas las prioridades</option>
+                    <option value="baja">Baja</option>
+                    <option value="media">Media</option>
+                    <option value="alta">Alta</option>
+                    <option value="urgente">Urgente</option>
+                  </select>
+                </div>
+                <span className="query-hint">
+                  URL: ?project={projectId}&status={statusFilter}&priority={priorityFilter}
+                </span>
+              </div>
+
+              <div className="kanban">
+                <div className="kanban-header">
+                  <h2 className="kanban-title">Tablero de tickets</h2>
+                  <span className="kanban-count">
+                    {filtered.length} ticket{filtered.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+
+                <div className="kanban-columns">
+                  {['abierto', 'en_progreso', 'resuelto', 'cerrado'].map((statusId) => {
+                    const columnTickets = filtered.filter((t) => t.status === statusId);
+                    return (
+                      <div
+                        key={statusId}
+                        className="kanban-column"
+                      >
+                        <div className="kanban-column-header">
+                          <h3 className="kanban-column-title" style={{ color: STATUS_COLOR[statusId] || 'var(--text-muted)' }}>
+                            {STATUS_LABEL[statusId] || statusId}
+                          </h3>
+                          <span className="kanban-column-count">{columnTickets.length}</span>
+                        </div>
+
+                        <div className="kanban-column-cards">
+                          {columnTickets.length === 0 ? (
+                            <div className="kanban-empty">
+                              <span className="kanban-empty-icon">—</span>
+                              <span className="kanban-empty-text">Sin tickets</span>
+                            </div>
+                          ) : (
+                            columnTickets.map((ticket) => (
+                              <article
+                                key={ticket.id}
+                                className="kanban-card"
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => openTicket(ticket)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    openTicket(ticket);
+                                  }
+                                }}
+                                style={{
+                                  borderLeft: `4px solid ${
+                                    safeGet(PRIORITY_COLOR, ticket.priority) || 'var(--border)'
+                                  }`,
+                                }}
+                              >
+                                <div className="kanban-card-header">
+                                  <span
+                                    className="kanban-card-type"
+                                    style={{ color: safeGet(TYPE_COLOR, ticket.type) || 'var(--text-muted)' }}
+                                  >
+                                    {(safeGet(TYPE_LABEL, ticket.type) ?? ticket.type) || 'Sin tipo'}
+                                  </span>
+                                  <span
+                                    className="kanban-card-priority"
+                                    style={{
+                                      color:
+                                        ticket.priority && PRIORITY_COLOR[ticket.priority]
+                                          ? PRIORITY_COLOR[ticket.priority]
+                                          : 'var(--text-muted)',
+                                    }}
+                                  >
+                                    {ticket.priority ? PRIORITY_LABEL[ticket.priority] : 'Sin prioridad'}
+                                  </span>
+                                </div>
+                                <h4 className="kanban-card-title">{ticket.title || 'Sin título'}</h4>
+                                <div className="kanban-card-meta">
+                                  <span className="kanban-card-category">{ticket.category || 'Sin categoría'}</span>
+                                  <span className="kanban-card-author">{ticket.created_by_name || 'operador'}</span>
+                                  <span className="kanban-card-date">{formatDate(ticket.created_at)}</span>
+                                </div>
+                                <div className="kanban-card-actions">
+                                  <button
+                                    className="kanban-move-btn kanban-move-prev"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      changeTicketStatus(ticket.id, 'abierto');
+                                    }}
+                                    disabled={ticket.status === 'abierto'}
+                                    aria-label="Mover a columna anterior"
+                                    title="Mover a columna anterior"
+                                  >
+                                    <span style={{ fontSize: '14px', lineHeight: 1 }}>&larr;</span>
+                                  </button>
+                                  <button
+                                    className="kanban-move-btn kanban-move-next"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      changeTicketStatus(ticket.id, 'cerrado');
+                                    }}
+                                    disabled={ticket.status === 'cerrado'}
+                                    aria-label="Mover a columna siguiente"
+                                    title="Mover a columna siguiente"
+                                  >
+                                    <span style={{ fontSize: '14px', lineHeight: 1 }}>&rarr;</span>
+                                  </button>
+                                </div>
+                              </article>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </main>
+          </div>
         ) : (
           <>
             {listError && (
@@ -760,9 +1112,7 @@ export default function App() {
                     }}
                     style={{
                       borderLeft: `4px solid ${
-                        t.priority && PRIORITY_COLOR[t.priority]
-                          ? PRIORITY_COLOR[t.priority]
-                          : 'var(--border)'
+                        safeGet(PRIORITY_COLOR, t.priority) || 'var(--border)'
                       }`,
                     }}
                   >
@@ -770,15 +1120,15 @@ export default function App() {
                       <span className="ticket-title">{t.title || 'Sin título'}</span>
                       <span
                         className="ticket-status"
-                        style={{ color: STATUS_COLOR[t.status] || 'var(--text-muted)' }}
+                        style={{ color: safeGet(STATUS_COLOR, t.status) || 'var(--text-muted)' }}
                       >
-                        {(STATUS_LABEL[t.status] ?? t.status) || 'Sin estado'}
+                        {(safeGet(STATUS_LABEL, t.status) ?? t.status) || 'Sin estado'}
                       </span>
                       <span
                         className="badge"
-                        style={{ color: TYPE_COLOR[t.type] || 'var(--text-muted)' }}
+                        style={{ color: safeGet(TYPE_COLOR, t.type) || 'var(--text-muted)' }}
                       >
-                        {(TYPE_LABEL[t.type] ?? t.type) || 'Sin tipo'}
+                        {(safeGet(TYPE_LABEL, t.type) ?? t.type) || 'Sin tipo'}
                       </span>
                     </div>
                     <div className="ticket-meta">
@@ -810,7 +1160,7 @@ export default function App() {
           >
             <div className="modal-head">
               <h2 className="modal-title" id="ticket-title">
-                {selected.title}
+                {selected.title || 'Sin título'}
               </h2>
               <button
                 className="icon-btn"
@@ -825,21 +1175,21 @@ export default function App() {
             <div className="badges">
               <span
                 className="badge"
-                style={{ color: PRIORITY_COLOR[selected.priority] || 'var(--text-muted)' }}
+                style={{ color: safeGet(PRIORITY_COLOR, selected.priority) || 'var(--text-muted)' }}
               >
                 Prioridad: {selected.priority || 'Sin prioridad'}
               </span>
               <span
                 className="badge"
-                style={{ color: STATUS_COLOR[selected.status] || 'var(--text-muted)' }}
+                style={{ color: safeGet(STATUS_COLOR, selected.status) || 'var(--text-muted)' }}
               >
-                Estado: {(STATUS_LABEL[selected.status] ?? selected.status) || 'Sin estado'}
+                Estado: {(safeGet(STATUS_LABEL, selected.status) ?? selected.status) || 'Sin estado'}
               </span>
               <span
                 className="badge"
-                style={{ color: TYPE_COLOR[selected.type] || 'var(--text-muted)' }}
+                style={{ color: safeGet(TYPE_COLOR, selected.type) || 'var(--text-muted)' }}
               >
-                Tipo: {(TYPE_LABEL[selected.type] ?? selected.type) || 'Sin tipo'}
+                Tipo: {(safeGet(TYPE_LABEL, selected.type) ?? selected.type) || 'Sin tipo'}
               </span>
               <span className="badge">Categoría: {selected.category || 'Sin categoría'}</span>
               <span className="badge">Por: {selected.created_by_name || 'operador'}</span>
@@ -857,7 +1207,7 @@ export default function App() {
               <select
                 className="select"
                 aria-label="Nuevo estado del ticket"
-                value={newStatus}
+                value={newStatus || 'abierto'}
                 disabled={updating}
                 onChange={(e) => setNewStatus(e.target.value as Ticket['status'])}
               >
@@ -936,6 +1286,7 @@ export default function App() {
           </div>
         </div>
       )}
+
       {confirmPending && (
         <div className="modal-overlay" onClick={() => setConfirmPending(null)}>
           <div
@@ -957,7 +1308,7 @@ export default function App() {
             </div>
             <p>
               ¿Estás seguro de que querés eliminar el ticket{' '}
-              <strong>{confirmPending.title}</strong>?
+              <strong>{confirmPending.title || 'sin título'}</strong>?
             </p>
             {modalError && (
               <div className="alert" role="alert" style={{ marginTop: 'var(--space-3)' }}>

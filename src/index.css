@@ -1,25 +1,22 @@
 /* ==========================================================================
-   Dev Ticket Panel — reset + tokens + estilos
-   Tema único oscuro (la app es dark-only). Ningún color, espacio, radio ni
-   tipografía está hardcodeado en el JSX: todo sale de los tokens de :root.
+   Dev Ticket Panel — Tema oscuro neon / pastel
+   Diseño system desde 0 según ui-ux-pro-max
+   Todos los colores son tokens. Sin hex sueltos en JSX.
    ========================================================================== */
 
 :root {
   color-scheme: dark;
 
-  /* --- Superficies (negro puro, sin tono azul) --------------------------- */
+  /* --- Superficies (negro profundo, sin tono azul) ----------------------- */
   --bg: #050505;
-  --surface: #111111;
-  --surface-sunken: #050505;
-  --surface-elevated: #1a1a1a;
-  --surface-hover: #1e1e1e;
-  --surface-active: #2a2a2a;
+  --surface: #0a0a0a;
+  --surface-elevated: #111111;
+  --surface-hover: #141414;
+  --surface-active: #1e1e1e;
 
   /* --- Bordes ------------------------------------------------------------ */
-  /* --border: borde de componentes (cards, separadores). Necesita 3:1 vs fondo. */
-  /* --border-strong: bordes de controles activos (inputs, selects). */
-  --border: #333333;
-  --border-strong: #555555;
+  --border: #1a1a1a;
+  --border-strong: #2a2a2a;
   --on-strong: #ffffff;
 
   /* --- Texto ------------------------------------------------------------- */
@@ -28,38 +25,60 @@
   --text-dim: #a1a1aa;
   --text-muted: #71717a;
 
-  /* --- Neon (colores de acción, foco, estados) --------------------------- */
-  --neon-primary: #22d3ee;    /* cian — acciones primarias, foco, feature */
-  --neon-secondary: #a855f7;  /* violeta — mejoras, fullstack */
-  --neon-danger: #ef4444;     /* rojo — bugs, urgente, eliminar */
-  --neon-success: #22c55e;    /* verde — resuelto, cerrado */
-  --neon-soft-primary: rgba(34, 211, 238, 0.18);
-  --neon-soft-secondary: rgba(168, 85, 247, 0.18);
-  --neon-soft-danger: rgba(239, 68, 68, 0.18);
-  --neon-soft-success: rgba(34, 197, 94, 0.18);
+  /* --- Neon primario (cian) ---------------------------------------------- */
+  --neon-primary: #22d3ee;
+  --on-neon-primary: #050505;
+  --neon-soft-primary: rgba(34, 211, 238, 0.15);
 
-  /* --- Prioridad (pastel, texto oscuro sobre pastel, >= 4.5:1 sobre --bg) -- */
+  /* --- Neon secundario (violeta) ------------------------------------------ */
+  --neon-secondary: #a855f7;
+  --on-neon-secondary: #ffffff;
+  --neon-soft-secondary: rgba(168, 85, 247, 0.15);
+
+  /* --- Neon peligro (rojo) ----------------------------------------------- */
+  --neon-danger: #ef4444;
+  --on-neon-danger: #ffffff;
+  --neon-soft-danger: rgba(239, 68, 68, 0.15);
+
+  /* --- Neon éxito (verde) ------------------------------------------------ */
+  --neon-success: #22c55e;
+  --on-neon-success: #050505;
+  --neon-soft-success: rgba(34, 197, 94, 0.15);
+
+  /* --- Prioridad (pastel, texto oscuro sobre pastel) ---------------------- */
   --prio-baja: #cbd5e1;
+  --on-prio-baja: #050505;
   --prio-media: #fde047;
+  --on-prio-media: #050505;
   --prio-alta: #fbbf24;
+  --on-prio-alta: #050505;
   --prio-urgente: #f87171;
+  --on-prio-urgente: #050505;
 
-  /* --- Estado del ticket (pastel, escala propia) --------------------------- */
+  /* --- Estado del ticket ------------------------------------------------- */
   --estado-abierto: #a855f7;
+  --on-estado-abierto: #ffffff;
   --estado-en_progreso: #22c55e;
+  --on-estado-en_progreso: #050505;
   --estado-resuelto: #16a34a;
+  --on-estado-resuelto: #ffffff;
   --estado-cerrado: #71717a;
+  --on-estado-cerrado: #ffffff;
 
-  /* --- Tipo de ticket (neon para badges de tipo) --------------------------- */
+  /* --- Tipo de ticket (neon para badges) ---------------------------------- */
   --type-bug: #ef4444;
+  --on-type-bug: #ffffff;
   --type-mejora: #a855f7;
+  --on-type-mejora: #ffffff;
   --type-feature: #22d3ee;
+  --on-type-feature: #050505;
   --type-tarea: #71717a;
+  --on-type-tarea: #ffffff;
 
-  /* --- Overlay ----------------------------------------------------------- */
+  /* --- Overlay ------------------------------------------------------------ */
   --scrim: rgba(5, 5, 5, 0.85);
 
-  /* --- Espaciado (escala 4/8) -------------------------------------------- */
+  /* --- Espaciado (escala 4/8) --------------------------------------------- */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -75,13 +94,13 @@
   --font-base: 14px;
   --font-lg: 16px;
   --font-xl: 20px;
+  --font: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 
   /* --- Forma y movimiento ------------------------------------------------ */
   --radius-sm: 6px;
   --radius: 8px;
   --radius-lg: 12px;
   --dur: 150ms;
-  --font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 
 * {
@@ -229,7 +248,7 @@ h3 {
   justify-content: center;
   gap: var(--space-2);
   background: var(--neon-primary);
-  color: var(--text);
+  color: var(--on-neon-primary);
   border: 1px solid transparent;
   padding: var(--space-2) var(--space-4);
   border-radius: var(--radius);
@@ -263,8 +282,8 @@ h3 {
 }
 
 .btn-danger {
-  background: var(--danger);
-  color: var(--on-danger);
+  background: var(--neon-danger);
+  color: var(--on-neon-danger);
 }
 
 .btn-ghost {
@@ -275,6 +294,7 @@ h3 {
 
 .btn-ghost:hover:not(:disabled) {
   color: var(--text);
+  background: var(--surface-hover);
 }
 
 .icon-btn {
@@ -312,6 +332,7 @@ h3 {
   border: 1px solid var(--neon-danger);
   background: var(--neon-soft-danger);
   color: var(--text);
+  margin-bottom: var(--space-4);
 }
 
 .alert-info {
@@ -373,7 +394,7 @@ h3 {
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: var(--bg);
+  background: var(--surface);
   color: var(--text);
   font: inherit;
   cursor: pointer;
@@ -558,7 +579,7 @@ h3 {
 .login-wrap {
   min-height: 100svh;
   display: flex;
-  align-items: center;
+  alignItems: center;
   justify-content: center;
   background: var(--bg);
   padding: var(--space-4);
@@ -633,4 +654,469 @@ h3 {
   overflow-wrap: anywhere;
 }
 
-/* Pensado para verse en la compu: layout de escritorio, sin breakpoints. */
+/* ==========================================================================
+   Dashboard y Kanban
+   ========================================================================== */
+
+.dashboard {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: var(--space-6);
+  padding: var(--space-6);
+  min-height: 100svh;
+}
+
+@media (max-width: 900px) {
+  .dashboard {
+    grid-template-columns: 1fr;
+  }
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.filters {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: var(--space-4);
+  align-items: end;
+  margin-bottom: var(--space-6);
+}
+
+@media (max-width: 640px) {
+  .filters {
+    grid-template-columns: 1fr;
+  }
+}
+
+.query-hint {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.charts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-6);
+  margin-bottom: var(--space-6);
+}
+
+@media (max-width: 900px) {
+  .charts {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+}
+
+.chart-wrap {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-height: 300px;
+}
+
+.chart-title {
+  font-size: var(--font-sm);
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: var(--space-2);
+}
+
+.axis-label {
+  font: 11px var(--font);
+  fill: var(--text-muted);
+}
+
+/* Tooltip */
+.tooltip {
+  position: absolute;
+  left: var(--tx, 0);
+  top: var(--ty, 0);
+  transform: translateX(-50%);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-sm);
+  color: var(--text);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  z-index: 10;
+  white-space: nowrap;
+}
+
+.tooltip.show {
+  opacity: 1;
+}
+
+.tooltip strong {
+  display: block;
+  font-size: var(--font-xs);
+  color: var(--text-dim);
+  margin-bottom: var(--space-1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tooltip {
+    transition: none !important;
+  }
+}
+
+/* KPI cards */
+.kpi-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.kpi-title {
+  font-size: var(--font-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+}
+
+.kpi-value {
+  font-size: var(--font-xl);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.kpi-sub {
+  font-size: var(--font-sm);
+  color: var(--text-dim);
+}
+
+.kpi-trend {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-xs);
+  font-weight: 600;
+  margin-top: var(--space-2);
+}
+
+.kpi-trend.trend-up {
+  color: var(--neon-success);
+}
+
+.kpi-trend.trend-down {
+  color: var(--neon-danger);
+}
+
+/* Skeleton */
+.skeleton {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  position: relative;
+}
+
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, var(--surface) 25%, #141414 50%, var(--surface) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-pulse 1.4s infinite;
+}
+
+.skeleton-text {
+  height: 14px;
+  border-radius: 4px;
+  margin: var(--space-2) 0;
+}
+
+.skeleton-text.sm {
+  width: 40%;
+}
+
+.skeleton-text.md {
+  width: 70%;
+}
+
+.skeleton-text.lg {
+  width: 100%;
+}
+
+.skeleton-big {
+  height: 32px;
+  border-radius: 6px;
+  width: 40%;
+  margin: var(--space-3) 0;
+}
+
+.skeleton-chart {
+  min-height: 300px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after {
+    animation: none !important;
+    opacity: 0.6 !important;
+  }
+}
+
+@keyframes skeleton-pulse {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Spinner SVG puro */
+.spinner {
+  width: 32px;
+  height: 32px;
+  animation: spin 0.8s linear infinite;
+}
+
+.spinner circle {
+  stroke: var(--neon-primary);
+  stroke-width: 3;
+  stroke-linecap: round;
+  fill: none;
+  stroke-dasharray: 80 80;
+}
+
+/* Kanban Board */
+.kanban {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.kanban-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-2);
+}
+
+.kanban-title {
+  font-size: var(--font-xl);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.kanban-count {
+  font-size: var(--font-sm);
+  color: var(--text-muted);
+}
+
+.kanban-columns {
+  display: flex;
+  flex-direction: row;
+  gap: var(--space-3);
+  overflow-x: auto;
+  padding-bottom: var(--space-2);
+}
+
+.kanban-column {
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  flex-shrink: 0;
+}
+
+.kanban-column-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  padding: var(--space-2);
+  background: var(--surface);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.kanban-column-title {
+  font-size: var(--font-sm);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0;
+}
+
+.kanban-column-count {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  background: var(--bg);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.kanban-column-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  min-height: 100px;
+  flex: 1;
+}
+
+.kanban-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+}
+
+.kanban-empty-icon {
+  font-size: 24px;
+}
+
+.kanban-empty-text {
+  font-size: var(--font-xs);
+}
+
+.kanban-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  cursor: pointer;
+  transition:
+    background-color var(--dur) ease,
+    border-color var(--dur) ease,
+    box-shadow var(--dur) ease;
+}
+
+.kanban-card:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+.kanban-card:focus-visible {
+  outline: 2px solid var(--neon-primary);
+  outline-offset: 2px;
+}
+
+.kanban-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.kanban-card-type {
+  font-size: var(--font-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.kanban-card-priority {
+  font-size: var(--font-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.kanban-card-title {
+  font-size: var(--font-md);
+  font-weight: 600;
+  color: var(--text);
+  margin: var(--space-1) 0 var(--space-2) 0;
+  line-height: 1.4;
+}
+
+.kanban-card-meta {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+
+.kanban-card-category,
+.kanban-card-author,
+.kanban-card-date {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+}
+
+.kanban-card-actions {
+  display: flex;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+.kanban-move-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background-color var(--dur) ease,
+    color var(--dur) ease,
+    border-color var(--dur) ease;
+}
+
+.kanban-move-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.kanban-move-btn:disabled {
+  color: var(--text-muted);
+  border-color: var(--border);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.kanban-move-icon {
+  width: 14px;
+  height: 14px;
+}
+
+@media (max-width: 900px) {
+  .kanban-columns {
+    overflow-x: auto;
+  }
+
+  .kanban-column {
+    width: 280px;
+  }
+}
