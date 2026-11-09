@@ -1,5 +1,6 @@
 /**
- * Dev Ticket Panel — Re-escrito desde 0 con diseño oscuro neon/pastel.
+ * Dev Ticket Panel — Re-escrito desde 0.
+ * Diseño oscuro neon/pastel.
  * Todo es defensivo: nunca se asume que un campo exista en el ticket.
  * Todos los colores son tokens CSS de src/index.css.
  */
@@ -106,10 +107,14 @@ function formatDate(iso?: string | null): string {
 }
 
 function formatClock(d: Date): string {
-  return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  return d.toLocaleTimeString('es-AR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
 }
 
-/** Conserva los comentarios optimistas que todavía no confirmó el servidor. */
 function mergeComments(server: Comment[], previous: Comment[]): Comment[] {
   const pending = previous.filter((c) => c.id.startsWith('temp-'));
   const stillPending = pending.filter(
@@ -220,7 +225,6 @@ export default function App() {
     });
   }, []);
 
-  /** Arranque: ¿sigue viva la cookie de sesión? */
   const boot = useCallback(async () => {
     setBootError('');
     setAuth('checking');
@@ -240,7 +244,6 @@ export default function App() {
     }
   }, [applyProjects]);
 
-  /** Refresco de la lista de proyectos con la sesión ya abierta. */
   const loadProjects = useCallback(async () => {
     setProjectsError('');
     try {
@@ -280,7 +283,6 @@ export default function App() {
     }
   }, [api, projectId]);
 
-  /** Al abrir: preguntar al servidor si la cookie de sesión sigue viva. */
   useEffect(() => {
     boot();
   }, [boot]);
@@ -297,14 +299,13 @@ export default function App() {
     loadTickets();
   }, [auth, projectId, loadTickets]);
 
-  /** Refresco automático: 5 s con un ticket abierto, 15 s en la lista. */
   useEffect(() => {
     if (auth !== 'authed' || !projectId) return;
     const delay = selected ? 5000 : 15000;
     const id = window.setInterval(async () => {
       if (document.hidden) return;
-      if (typingRef.current) return; // no pisar lo que se está escribiendo
-      if (busyRef.current) return; // hay una mutación en vuelo
+      if (typingRef.current) return;
+      if (busyRef.current) return;
       await loadTickets(true);
       if (selected && !sending) {
         const ticketId = selected.id;
@@ -324,7 +325,6 @@ export default function App() {
     return () => window.clearInterval(id);
   }, [auth, projectId, selected?.id, sending, api, loadTickets]);
 
-  /** Modal como dialog: Escape cierra, el foco queda atrapado y vuelve al abrir. */
   useEffect(() => {
     if (!selected) return;
     const opener = document.activeElement as HTMLElement | null;
