@@ -25,6 +25,17 @@ export type Ticket = {
   resolved_at: string | null;
 };
 
+type Attachment = {
+  id: string;
+  ticket_id: string;
+  comment_id: string | null;
+  uploaded_by: string | null;
+  file_url: string;
+  file_name: string;
+  mime_type?: string;
+  uploaded_at: string;
+};
+
 type Comment = {
   id: string;
   ticket_id: string;
@@ -32,6 +43,8 @@ type Comment = {
   author_name?: string | null;
   body: string;
   created_at: string;
+  /** Capturas pegadas al mensaje (llegan vacías si el ticket no tiene). */
+  attachments?: Attachment[] | null;
 };
 
 type Project = {
@@ -158,6 +171,13 @@ export default function App() {
   const [confirmPending, setConfirmPending] = useState<Ticket | null>(null);
   const [modalError, setModalError] = useState('');
   const [newStatus, setNewStatus] = useState<Ticket['status']>('abierto');
+  const [lightbox, setLightbox] = useState<{ url: string; name: string } | null>(null);
+  // Ref aparte para que el handler de Escape del modal sepa si el lightbox está
+  // abierto (si no, al cerrar la imagen se cerraría también el ticket).
+  const lightboxRef = useRef<{ url: string; name: string } | null>(null);
+  useEffect(() => {
+    lightboxRef.current = lightbox;
+  }, [lightbox]);
   const commentsSeq = useRef(0);
   const commentsVersion = useRef(0);
   const selectedIdRef = useRef<string | null>(null);
@@ -215,6 +235,15 @@ export default function App() {
     if (res.status === 204) return null;
     return res.json();
   }, [projectId, resetSession]);
+
+  // La app remota devuelve la URL de SU API (`/api/tickets/:id/attachments/:aid/file`).
+  // El panel no puede pegarle a esa URL: hay que pasar por el proxy, que es lo
+  // único que conoce la devKey. La cookie de sesión del panel es httpOnly y
+  // SameSite=Lax, así que el <img> la manda solo.
+  const attachmentUrl = useCallback((a: Attachment) => {
+    const path = String(a.file_url || '').replace(/^\/api(?=\/)/, '');
+    return `/api/proxy?project=${encodeURIComponent(projectId)}&path=${encodeURIComponent(path)}`;
+  }, [projectId]);
 
   const applyProjects = useCallback((list: Project[]) => {
     setProjects(list);
@@ -333,10 +362,16 @@ export default function App() {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
+        // El lightbox va por encima: Escape cierra la imagen, no el ticket.
+        if (lightboxRef.current) {
+          setLightbox(null);
+          return;
+        }
         closeTicket();
         return;
       }
       if (e.key !== 'Tab' || !modalRef.current) return;
+      if (lightboxRef.current) return;
       const items = focusable(modalRef.current);
       if (items.length === 0) return;
       const first = items[0];
@@ -1249,7 +1284,22 @@ export default function App() {
                   <div className="comment-meta">
                     {c.author_name || 'usuario'} · {formatDate(c.created_at)}
                   </div>
-                  <div className="comment-body">{c.body}</div>
+                  {c.body && <div className="comment-body">{c.body}</div>}
+                  {Array.isArray(c.attachments) && c.attachments.length > 0 && (
+                    <div className="comment-attachments">
+                      {c.attachments.map((a) => (
+                        <button
+                          key={a.id}
+                          type="button"
+                          className="comment-attachment"
+                          title={a.file_name}
+                          onClick={() => setLightbox({ url: attachmentUrl(a), name: a.file_name })}
+                        >
+                          <img src={attachmentUrl(a)} alt={a.file_name} loading="lazy" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -1331,6 +1381,26 @@ export default function App() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {lightbox && (
+        <div
+          className="lightbox"
+          role="dialog"
+          aria-modal="true"
+          aria-label={lightbox.name}
+          onClick={() => setLightbox(null)}
+        >
+          <img src={lightbox.url} alt={lightbox.name} />
+          <button
+            type="button"
+            className="icon-btn lightbox-close"
+            onClick={() => setLightbox(null)}
+            aria-label="Cerrar imagen"
+          >
+            ✕
+          </button>
         </div>
       )}
     </div>

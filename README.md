@@ -30,6 +30,28 @@ El proxy solo permite rutas que empiecen con `/tickets`.
 La sesión va en una cookie `HttpOnly; SameSite=Lax`, así que el JavaScript del
 navegador no puede leerla (no hay token en `localStorage`).
 
+## Capturas adjuntas en los tickets
+
+Desde el 2026-11-11 los tickets pueden llevar **imágenes pegadas al mensaje**
+(en gesope: tabla `ticket_attachments` con `comment_id`). El panel las muestra como
+miniaturas dentro de la burbuja del comentario, y al hacer clic se abren a tamaño
+completo en un visor.
+
+Dos detalles que hacen que funcione:
+
+- **El proxy tiene que pasar bytes, no texto.** Las respuestas JSON se reenvían
+  como texto; las imágenes (JPEG/PNG) tienen que ir como `arrayBuffer` + el
+  `Content-Type` original. Si se leen como texto, el archivo llega corrupto y el
+  `<img>` no lo muestra.
+- **La URL hay que reescribirla.** La app cliente devuelve su propia ruta
+  (`/api/tickets/:id/attachments/:aid/file`), que el panel no puede pedir
+  directamente: hay que pasarla por `/api/proxy?project=<id>&path=<ruta>`. El
+  proxy es el único que conoce la `devKey`.
+
+Como la sesión del panel es una cookie `HttpOnly` del mismo origen, el `<img>`
+manda la cookie solo: no hace falta `fetch` + blob (a diferencia de un frontend
+que use JWT en un header).
+
 ## Dashboard
 
 Desde la versión actual, el panel incluye una vista de **dashboard** con métricas y

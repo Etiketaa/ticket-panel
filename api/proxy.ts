@@ -37,13 +37,20 @@ export default async function handler(req: any, res: any) {
     }
 
     const upstream = await fetch(target, init);
-    const text = await upstream.text();
+    const contentType = upstream.headers.get('content-type') || '';
     res.status(upstream.status);
-    if ((upstream.headers.get('content-type') || '').includes('application/json')) {
+    if (contentType.includes('application/json')) {
+      const text = await upstream.text();
       res.setHeader('Content-Type', 'application/json');
       res.send(text || '{}');
     } else {
-      res.send(text);
+      // Binario (capturas de tickets): hay que pasar los bytes tal cual. Leerlo
+      // como texto los corrompe (el JPEG vuelve ilegible).
+      const buffer = Buffer.from(await upstream.arrayBuffer());
+      res.setHeader('Content-Type', contentType || 'application/octet-stream');
+      const disposition = upstream.headers.get('content-disposition');
+      if (disposition) res.setHeader('Content-Disposition', disposition);
+      res.send(buffer);
     }
   } catch (err: any) {
     res.status(502).json({ error: 'No se pudo contactar la app', detail: err?.message });
