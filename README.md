@@ -30,14 +30,34 @@ El proxy solo permite rutas que empiecen con `/tickets`.
 La sesión va en una cookie `HttpOnly; SameSite=Lax`, así que el JavaScript del
 navegador no puede leerla (no hay token en `localStorage`).
 
-## Capturas adjuntas en los tickets
+## Adjuntos en los tickets (fotos y archivos)
 
 Desde el 2026-11-11 los tickets pueden llevar **imágenes pegadas al mensaje**
 (en gesope: tabla `ticket_attachments` con `comment_id`). El panel las muestra como
 miniaturas dentro de la burbuja del comentario, y al hacer clic se abren a tamaño
 completo en un visor.
 
-Dos detalles que hacen que funcione:
+### Cargar un adjunto desde el panel
+
+El composer tiene un botón **"Adjuntar"** (`input[type=file]`). Lo que se elige pasa por
+`src/utils/adjuntos.ts` antes de subirlo:
+
+- **Imágenes**: se redimensionan a 1600 px de lado máximo y se recomprimen a JPEG 0.8
+  (`prepararAdjunto`), para no comerse el límite de la request.
+- **Documentos** (PDF, Office, ZIP, TXT/CSV/JSON): se mandan tal cual, hasta **3 MB**.
+  El backend valida el contenido del archivo por sus *magic bytes* (no confía en el
+  nombre ni en el MIME que declara el navegador) y define la extensión guardada.
+
+El flujo es **primero el comentario, después el archivo**: el POST de
+`/tickets/:id/comments` devuelve el id real del mensaje y recién ahí se hace el POST de
+`/tickets/:id/attachments` con ese `comment_id`. Si el archivo falla, el mensaje igual
+sale y se avisa por separado (el archivo perdido no se come el mensaje).
+
+Los documentos se muestran como un chip con el nombre y un link **Descargar**; las
+imágenes, como miniatura. El preview local de un documento no es descargable (todavía
+no tiene id en el servidor): el link de descarga aparece cuando el backend confirma.
+
+### Detalles que hacen que funcione:
 
 - **El proxy tiene que pasar bytes, no texto.** Las respuestas JSON se reenvían
   como texto; las imágenes (JPEG/PNG) tienen que ir como `arrayBuffer` + el

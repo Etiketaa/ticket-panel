@@ -6,6 +6,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { prepararAdjunto, type AdjuntoPreparado } from './utils/adjuntos.ts';
 
 export type Ticket = {
   id: string;
@@ -165,6 +166,10 @@ export default function App() {
   const [selected, setSelected] = useState<Ticket | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentText, setCommentText] = useState('');
+  /** Archivo elegido para adjuntar al próximo mensaje (imagen o documento). */
+  const [pendingAttachment, setPendingAttachment] = useState<AdjuntoPreparado | null>(null);
+  const [attachmentError, setAttachmentError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [sending, setSending] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -493,7 +498,8 @@ export default function App() {
 
   const sendComment = async () => {
     const text = commentText.trim();
-    if (!selected || !text || sending) return;
+    const adjunto = pendingAttachment;
+    if (!selected || (!text && !adjunto) || sending) return;
     const ticketId = selected.id;
     const tempId = `temp-${Date.now()}`;
     const optimistic: Comment = {
@@ -503,12 +509,30 @@ export default function App() {
       author_name: 'Soporte',
       body: text,
       created_at: new Date().toISOString(),
+      // El archivo se ve al instante (data URI local) y después se reemplaza
+      // por el adjunto real que devuelve el server.
+      attachments: adjunto
+        ? [
+            {
+              id: `temp-att-${Date.now()}`,
+              ticket_id: ticketId,
+              comment_id: null,
+              uploaded_by: null,
+              file_url: adjunto.dataUri,
+              file_name: adjunto.fileName,
+              mime_type: adjunto.mimeType,
+              uploaded_at: new Date().toISOString(),
+            },
+          ]
+        : [],
     };
 
     commentsVersion.current += 1;
     busyRef.current = true;
     setSending(true);
     setCommentText('');
+    setPendingAttachment(null);
+    setAttachmentError('');
     setModalError('');
     setComments((prev) => [...prev, optimistic]);
 
@@ -517,18 +541,42 @@ export default function App() {
         method: 'POST',
         body: JSON.stringify({ body: text }),
       });
+      // El archivo se sube DESPUÉS del comentario (necesita el id real).
+      let final = c;
+      if (adjunto) {
+        try {
+          const att = await api(`/tickets/${ticketId}/attachments`, {
+            method: 'POST',
+            body: JSON.stringify({
+              file_base64: adjunto.dataUri,
+              file_name: adjunto.fileName,
+              comment_id: c.id,
+            }),
+          });
+          final = { ...c, attachments: [...(c.attachments || []), att] };
+        } catch (err) {
+          // El mensaje ya salió: se avisa que el archivo no pudo adjuntarse.
+          if (selectedIdRef.current === ticketId) {
+            setModalError(
+              'El mensaje se envió, pero el archivo no pudo adjuntarse: '
+                + (err instanceof Error ? err.message : 'error desconocido')
+            );
+          }
+        }
+      }
       if (selectedIdRef.current !== ticketId) return;
       setComments((prev) => {
         if (prev.some((x) => x.id === tempId)) {
-          return prev.map((x) => (x.id === tempId ? c : x));
+          return prev.map((x) => (x.id === tempId ? final : x));
         }
-        if (prev.some((x) => x.id === c.id)) return prev;
-        return [...prev, c];
+        if (prev.some((x) => x.id === final.id)) return prev;
+        return [...prev, final];
       });
     } catch (err) {
       if (selectedIdRef.current === ticketId) {
         setComments((prev) => prev.filter((x) => x.id !== tempId));
         setCommentText(text);
+        if (adjunto) setPendingAttachment(adjunto);
         setModalError(err instanceof Error ? err.message : 'No se pudo enviar el comentario');
       }
     } finally {
@@ -536,6 +584,31 @@ export default function App() {
       setSending(false);
     }
   };
+
+  /** Elige el archivo a adjuntar (imagen o documento). */
+  const pickAttachment = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setAttachmentError('');
+    try {
+      setPendingAttachment(await prepararAdjunto(file));
+    } catch (err) {
+      setAttachmentError(err instanceof Error ? err.message : 'No se pudo adjuntar el archivo.');
+    }
+  };
+
+  /** ¿El adjunto es una imagen (miniatura) o un documento (chip de descarga)? */
+  const esImagenAdjunto = useCallback((a: Attachment) => {
+    if (a.mime_type) return a.mime_type.startsWith('image/');
+    return /\.(jpe?g|png|webp|gif|bmp|heic|heif)$/i.test(a.file_name || '');
+  }, []);
+
+  /** ¿El adjunto es el preview local (aún no subido)? */
+  const esAdjuntoLocal = useCallback(
+    (a: Attachment) => String(a.file_url || '').startsWith('data:'),
+    []
+  );
 
   const confirmDelete = async () => {
     if (!confirmPending || deleting) return;
@@ -1287,17 +1360,50 @@ export default function App() {
                   {c.body && <div className="comment-body">{c.body}</div>}
                   {Array.isArray(c.attachments) && c.attachments.length > 0 && (
                     <div className="comment-attachments">
-                      {c.attachments.map((a) => (
-                        <button
-                          key={a.id}
-                          type="button"
-                          className="comment-attachment"
-                          title={a.file_name}
-                          onClick={() => setLightbox({ url: attachmentUrl(a), name: a.file_name })}
-                        >
-                          <img src={attachmentUrl(a)} alt={a.file_name} loading="lazy" />
-                        </button>
-                      ))}
+                      {c.attachments.map((a) => {
+                        const local = esAdjuntoLocal(a);
+                        const src = local ? a.file_url : attachmentUrl(a);
+                        if (esImagenAdjunto(a)) {
+                          return (
+                            <button
+                              key={a.id}
+                              type="button"
+                              className="comment-attachment"
+                              title={a.file_name}
+                              onClick={() => setLightbox({ url: src, name: a.file_name })}
+                            >
+                              <img src={src} alt={a.file_name} loading="lazy" />
+                            </button>
+                          );
+                        }
+                        // Documento: chip con el nombre. El preview local todavía
+                        // no está en el server, así que no es descargable.
+                        if (local) {
+                          return (
+                            <span
+                              key={a.id}
+                              className="comment-attachment-file is-local"
+                              title={a.file_name}
+                            >
+                              <span className="comment-attachment-file-tag">Archivo</span>
+                              <span className="comment-attachment-file-name">{a.file_name}</span>
+                            </span>
+                          );
+                        }
+                        return (
+                          <a
+                            key={a.id}
+                            className="comment-attachment-file"
+                            title={`Descargar ${a.file_name}`}
+                            href={src}
+                            download={a.file_name}
+                          >
+                            <span className="comment-attachment-file-tag">Archivo</span>
+                            <span className="comment-attachment-file-name">{a.file_name}</span>
+                            <span className="comment-attachment-file-action">Descargar</span>
+                          </a>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -1305,7 +1411,7 @@ export default function App() {
             </div>
 
             <div className="composer">
-              <div style={{ flex: 1 }}>
+              <div className="composer-main">
                 <label className="sr-only" htmlFor="comment">
                   Escribir comentario
                 </label>
@@ -1320,18 +1426,63 @@ export default function App() {
                       sendComment();
                     }
                   }}
-                  placeholder="Escribir comentario…"
+                  placeholder={pendingAttachment ? 'Escribí algo y mandá el archivo…' : 'Escribir comentario…'}
                   rows={3}
                 />
                 <div className="composer-hint">Ctrl+Enter envía · Shift+Enter hace un salto de línea</div>
+                {pendingAttachment && (
+                  <div className="composer-attachment">
+                    {pendingAttachment.esImagen ? (
+                      <img
+                        src={pendingAttachment.dataUri}
+                        alt="Vista previa del adjunto"
+                        className="composer-attachment-thumb"
+                      />
+                    ) : (
+                      <span className="composer-attachment-tag">Archivo</span>
+                    )}
+                    <span className="composer-attachment-name">{pendingAttachment.fileName}</span>
+                    <button
+                      type="button"
+                      className="composer-attachment-remove"
+                      onClick={() => setPendingAttachment(null)}
+                      aria-label="Quitar el archivo"
+                      title="Quitar el archivo"
+                    >
+                      ×
+                    </button>
+                  </div>
+                )}
+                {attachmentError && (
+                  <p role="alert" className="composer-error">
+                    {attachmentError}
+                  </p>
+                )}
               </div>
-              <button
-                className="btn"
-                onClick={sendComment}
-                disabled={sending || !commentText.trim()}
-              >
-                {sending ? 'Enviando…' : 'Enviar'}
-              </button>
+              <div className="composer-actions">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="sr-only"
+                  accept="image/*,.pdf,.txt,.csv,.json,.doc,.docx,.xls,.xlsx,.odt,.ods,.zip"
+                  onChange={pickAttachment}
+                />
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Adjuntar una foto o un archivo"
+                >
+                  Adjuntar
+                </button>
+                <button
+                  className="btn"
+                  onClick={sendComment}
+                  disabled={sending || (!commentText.trim() && !pendingAttachment)}
+                >
+                  {sending ? 'Enviando…' : 'Enviar'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
