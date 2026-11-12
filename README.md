@@ -39,7 +39,7 @@ completo en un visor.
 
 ### Cargar un adjunto desde el panel
 
-El composer tiene un botón **"Adjuntar"** (`input[type=file]`). Lo que se elige pasa por
+El composer tiene un botón **"Adjuntar"**. Lo que se elige pasa por
 `src/utils/adjuntos.ts` antes de subirlo:
 
 - **Imágenes**: se redimensionan a 1600 px de lado máximo y se recomprimen a JPEG 0.8
@@ -47,6 +47,16 @@ El composer tiene un botón **"Adjuntar"** (`input[type=file]`). Lo que se elige
 - **Documentos** (PDF, Office, ZIP, TXT/CSV/JSON): se mandan tal cual, hasta **3 MB**.
   El backend valida el contenido del archivo por sus *magic bytes* (no confía en el
   nombre ni en el MIME que declara el navegador) y define la extensión guardada.
+
+Dos detalles que importan en el teléfono:
+
+- El input de archivo va **`sr-only` y el botón es un `<label for>`** (no `hidden` +
+  `.click()` programático): en **iOS Safari** un input con `display:none` no abre el
+  selector de archivos, y el botón queda como si no hiciera nada.
+- Las **fotos HEIC del iPhone** no se pueden decodificar en Chrome/Edge: si el archivo
+  entra en el body se sube igual y se muestra como **chip descargable** (nunca una
+  miniatura rota); si no entra, el error dice que el problema es el formato y cómo
+  resolverlo (guardarla como JPG o mandarla desde Safari).
 
 El flujo es **primero el comentario, después el archivo**: el POST de
 `/tickets/:id/comments` devuelve el id real del mensaje y recién ahí se hace el POST de
