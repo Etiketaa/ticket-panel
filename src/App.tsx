@@ -5,7 +5,7 @@
  * Todos los colores son tokens CSS de src/index.css.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { prepararAdjunto, type AdjuntoPreparado } from './utils/adjuntos.ts';
 
 export type Ticket = {
@@ -169,7 +169,7 @@ export default function App() {
   /** Archivo elegido para adjuntar al próximo mensaje (imagen o documento). */
   const [pendingAttachment, setPendingAttachment] = useState<AdjuntoPreparado | null>(null);
   const [attachmentError, setAttachmentError] = useState('');
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputId = useId();
   const [sending, setSending] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -600,8 +600,11 @@ export default function App() {
 
   /** ¿El adjunto es una imagen (miniatura) o un documento (chip de descarga)? */
   const esImagenAdjunto = useCallback((a: Attachment) => {
+    // HEIC/HEIF: los navegadores que no son Safari no las muestran, así que
+    // van como chip descargable (una miniatura rota no sirve de nada).
+    if (/\.(heic|heif)$/i.test(a.file_name || '')) return false;
     if (a.mime_type) return a.mime_type.startsWith('image/');
-    return /\.(jpe?g|png|webp|gif|bmp|heic|heif)$/i.test(a.file_name || '');
+    return /\.(jpe?g|png|webp|gif|bmp)$/i.test(a.file_name || '');
   }, []);
 
   /** ¿El adjunto es el preview local (aún no subido)? */
@@ -1460,21 +1463,24 @@ export default function App() {
                 )}
               </div>
               <div className="composer-actions">
+                {/* El input va `sr-only` (no `display:none`): en iOS Safari un
+                    input oculto con `display:none` no abre el selector. Y el
+                    botón es un `<label for>`: el patrón que los móviles
+                    respetan siempre. */}
                 <input
-                  ref={fileInputRef}
+                  id={fileInputId}
                   type="file"
                   className="sr-only"
                   accept="image/*,.pdf,.txt,.csv,.json,.doc,.docx,.xls,.xlsx,.odt,.ods,.zip"
                   onChange={pickAttachment}
                 />
-                <button
-                  type="button"
+                <label
+                  htmlFor={fileInputId}
                   className="btn btn-ghost"
-                  onClick={() => fileInputRef.current?.click()}
                   title="Adjuntar una foto o un archivo"
                 >
                   Adjuntar
-                </button>
+                </label>
                 <button
                   className="btn"
                   onClick={sendComment}

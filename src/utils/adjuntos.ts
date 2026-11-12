@@ -20,6 +20,12 @@ export type AdjuntoPreparado = {
   esImagen: boolean;
   /** MIME del archivo. */
   mimeType: string;
+  /**
+   * `true` si el archivo ES una imagen pero el navegador no la puede mostrar
+   * (HEIC del iPhone en Chrome/Edge). Se sube igual y se muestra como chip
+   * descargable, en vez de una miniatura rota.
+   */
+  noRenderizable?: boolean;
 };
 
 // Extensiones de imagen por si el navegador no declara el MIME.
@@ -38,10 +44,18 @@ function leerComoDataUri(file: File): Promise<string> {
 async function comprimirImagen(file: File): Promise<AdjuntoPreparado> {
   const original = await leerComoDataUri(file);
   const img = new Image();
-  const base = { esImagen: true, mimeType: file.type || 'image/jpeg' };
+  // Si el navegador no puede decodificar la imagen (HEIC del iPhone en
+  // Chrome/Edge), se sube el original y se muestra como chip descargable.
+  const sinPrevisualizar = {
+    dataUri: original,
+    fileName: file.name,
+    esImagen: false,
+    noRenderizable: true,
+    mimeType: file.type || 'application/octet-stream',
+  };
 
   return new Promise((resolve) => {
-    img.onerror = () => resolve({ dataUri: original, fileName: file.name, ...base });
+    img.onerror = () => resolve(sinPrevisualizar);
     img.onload = () => {
       try {
         let { width, height } = img;
@@ -63,7 +77,7 @@ async function comprimirImagen(file: File): Promise<AdjuntoPreparado> {
           mimeType: 'image/jpeg',
         });
       } catch {
-        resolve({ dataUri: original, fileName: file.name, ...base });
+        resolve(sinPrevisualizar);
       }
     };
     img.src = original;
@@ -85,7 +99,7 @@ export async function prepararAdjunto(file: File): Promise<AdjuntoPreparado> {
     const imagen = await comprimirImagen(file);
     // La compresión puede fallar (HEIC, canvas no disponible): en ese caso
     // queda la original, que puede no entrar en el body de la request.
-    verificarTamanio(imagen.dataUri);
+    verificarTamanio(imagen.dataUri, imagen.noRenderizable === true);
     return imagen;
   }
 
@@ -102,11 +116,22 @@ export async function prepararAdjunto(file: File): Promise<AdjuntoPreparado> {
   };
 }
 
-/** Corta si el data URI.encode supera el tope (base64 engorda ~33%). */
-function verificarTamanio(dataUri: string): void {
+/**
+ * Corta si el data URI (base64) supera el tope (base64 engorda ~33%).
+ *
+ * Si lo que no entra es una foto que el navegador no puede convertir (HEIC del
+ * iPhone en Chrome), el mensaje dice la verdad: el problema es el formato.
+ */
+function verificarTamanio(dataUri: string, noRenderizable: boolean): void {
   const base64 = dataUri.slice(dataUri.indexOf(',') + 1);
   const bytes = Math.floor((base64.length * 3) / 4);
   if (bytes > MAX_ADJUNTO_BYTES) {
+    if (noRenderizable) {
+      throw new Error(
+        'Tu navegador no puede convertir las fotos HEIC del iPhone. ' +
+        'Guardala como JPG (o mandala desde Safari) y probá de nuevo.'
+      );
+    }
     throw new Error(
       `La imagen es demasiado grande (máximo ${Math.round(MAX_ADJUNTO_BYTES / 1024 / 1024)} MB).`
     );
