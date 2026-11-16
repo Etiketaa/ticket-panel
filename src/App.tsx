@@ -5,9 +5,11 @@
  * Todos los colores son tokens CSS de src/index.css.
  */
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import JSZip from 'jszip';
 import { prepararAdjunto, type AdjuntoPreparado } from './utils/adjuntos.ts';
+import DashboardView from './dashboard/components/DashboardView.tsx';
+import { KanbanBoard } from './dashboard/components/KanbanBoard.tsx';
 
 export type Ticket = {
   id: string;
@@ -55,13 +57,6 @@ type Project = {
   baseUrl: string;
 };
 
-const PRIORITY_COLOR: Record<string, string> = {
-  baja: 'var(--prio-baja)',
-  media: 'var(--prio-media)',
-  alta: 'var(--prio-alta)',
-  urgente: 'var(--prio-urgente)',
-};
-
 const PRIORITY_LABEL: Record<string, string> = {
   baja: 'Baja',
   media: 'Media',
@@ -69,25 +64,11 @@ const PRIORITY_LABEL: Record<string, string> = {
   urgente: 'Urgente',
 };
 
-const STATUS_COLOR: Record<string, string> = {
-  abierto: 'var(--estado-abierto)',
-  en_progreso: 'var(--estado-en_progreso)',
-  resuelto: 'var(--estado-resuelto)',
-  cerrado: 'var(--estado-cerrado)',
-};
-
 const STATUS_LABEL: Record<string, string> = {
   abierto: 'Abierto',
   en_progreso: 'En progreso',
   resuelto: 'Resuelto',
   cerrado: 'Cerrado',
-};
-
-const TYPE_COLOR: Record<string, string> = {
-  bug: 'var(--type-bug)',
-  mejora: 'var(--type-mejora)',
-  feature: 'var(--type-feature)',
-  tarea: 'var(--type-tarea)',
 };
 
 const TYPE_LABEL: Record<string, string> = {
@@ -98,6 +79,17 @@ const TYPE_LABEL: Record<string, string> = {
 };
 
 const PROJECT_KEY = 'panel_project';
+
+function readUrlFilters() {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    project: params.get('project') || '',
+    status: params.get('status') || 'all',
+    priority: params.get('priority') || 'all',
+    view: (params.get('view') as 'list' | 'dashboard' | 'kanban' | null) || 'list',
+    q: params.get('q') || '',
+  };
+}
 
 function safeGet<T extends string | number | symbol, V>(
   map: Record<T, V>,
@@ -130,6 +122,26 @@ function formatClock(d: Date): string {
   });
 }
 
+/**
+ * Badge semántico. El color no se pasa por estilo inline: se resuelve en CSS
+ * a partir de `data-kind` / `data-value`, así los tokens viven en un solo lugar.
+ */
+function Badge({
+  kind,
+  value,
+  children,
+}: {
+  kind?: 'priority' | 'status' | 'type';
+  value?: string | null;
+  children: ReactNode;
+}) {
+  return (
+    <span className="badge" data-kind={kind} data-value={value ?? 'none'}>
+      {children}
+    </span>
+  );
+}
+
 function mergeComments(server: Comment[], previous: Comment[]): Comment[] {
   const pending = previous.filter((c) => c.id.startsWith('temp-'));
   const stillPending = pending.filter(
@@ -155,15 +167,19 @@ export default function App() {
   const [loggingIn, setLoggingIn] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsError, setProjectsError] = useState('');
-  const [projectId, setProjectId] = useState(() => localStorage.getItem(PROJECT_KEY) || '');
+  const [projectId, setProjectId] = useState(() => readUrlFilters().project || localStorage.getItem(PROJECT_KEY) || '');
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [listError, setListError] = useState('');
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [priorityFilter, setPriorityFilter] = useState('all');
-  const [view, setView] = useState<'list' | 'dashboard' | 'kanban'>('list');
+  const [statusFilter, setStatusFilter] = useState(() => readUrlFilters().status);
+  const [priorityFilter, setPriorityFilter] = useState(() => readUrlFilters().priority);
+  const [view, setView] = useState<'list' | 'dashboard' | 'kanban'>(() => {
+    const v = readUrlFilters().view;
+    return v === 'dashboard' || v === 'kanban' ? v : 'list';
+  });
+  const [search, setSearch] = useState(() => readUrlFilters().q);
   const [selected, setSelected] = useState<Ticket | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentText, setCommentText] = useState('');
@@ -177,7 +193,6 @@ export default function App() {
   const [downloadingDiag, setDownloadingDiag] = useState(false);
   const [confirmPending, setConfirmPending] = useState<Ticket | null>(null);
   const [modalError, setModalError] = useState('');
-  const [newStatus, setNewStatus] = useState<Ticket['status']>('abierto');
   const [lightbox, setLightbox] = useState<{ url: string; name: string } | null>(null);
   // Ref aparte para que el handler de Escape del modal sepa si el lightbox está
   // abierto (si no, al cerrar la imagen se cerraría también el ticket).
@@ -194,9 +209,11 @@ export default function App() {
   const modalRef = useRef<HTMLDivElement>(null);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
 
-  typingRef.current = commentText.trim().length > 0;
-
   const activeProject = projects.find((p) => p.id === projectId) || null;
+
+  useEffect(() => {
+    typingRef.current = commentText.trim().length > 0;
+  }, [commentText]);
 
   const resetSession = useCallback(() => {
     localStorage.removeItem(PROJECT_KEY);
@@ -255,8 +272,13 @@ export default function App() {
   const applyProjects = useCallback((list: Project[]) => {
     setProjects(list);
     setProjectId((prev) => {
+      const urlProject = readUrlFilters().project;
       const saved = localStorage.getItem(PROJECT_KEY) || '';
-      const candidate = list.find((p) => p.id === prev) || list.find((p) => p.id === saved) || list[0];
+      const candidate =
+        list.find((p) => p.id === prev) ||
+        list.find((p) => p.id === urlProject) ||
+        list.find((p) => p.id === saved) ||
+        list[0];
       return candidate ? candidate.id : '';
     });
   }, []);
@@ -359,7 +381,16 @@ export default function App() {
       }
     }, delay);
     return () => window.clearInterval(id);
-  }, [auth, projectId, selected?.id, sending, api, loadTickets]);
+  }, [auth, projectId, selected?.id, confirmPending, sending, api, loadTickets]);
+
+  const closeTicket = () => {
+    selectedIdRef.current = null;
+    commentsSeq.current += 1;
+    setSelected(null);
+    setComments([]);
+    setCommentText('');
+    setModalError('');
+  };
 
   useEffect(() => {
     if (!selected) return;
@@ -369,6 +400,10 @@ export default function App() {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
+        if (confirmPending) {
+          setConfirmPending(null);
+          return;
+        }
         // El lightbox va por encima: Escape cierra la imagen, no el ticket.
         if (lightboxRef.current) {
           setLightbox(null);
@@ -434,16 +469,58 @@ export default function App() {
     resetSession();
   };
 
-  const filtered = tickets.filter((t) => {
-    if (statusFilter !== 'all' && t.status !== statusFilter) return false;
-    if (priorityFilter !== 'all' && t.priority !== priorityFilter) return false;
-    return true;
-  });
+  useEffect(() => {
+    if (auth !== 'authed') return;
+    const params = new URLSearchParams();
+    if (projectId) params.set('project', projectId);
+    if (statusFilter !== 'all') params.set('status', statusFilter);
+    if (priorityFilter !== 'all') params.set('priority', priorityFilter);
+    if (view !== 'list') params.set('view', view);
+    if (search.trim()) params.set('q', search.trim());
+    const qs = params.toString();
+    const next = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+    window.history.replaceState(null, '', next);
+  }, [auth, projectId, statusFilter, priorityFilter, view, search]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const statusRank: Record<string, number> = { abierto: 0, en_progreso: 1, resuelto: 2, cerrado: 3 };
+    const prioRank: Record<string, number> = { urgente: 0, alta: 1, media: 2, baja: 3 };
+    return tickets
+      .filter((t) => {
+        if (statusFilter !== 'all' && t.status !== statusFilter) return false;
+        if (priorityFilter !== 'all' && t.priority !== priorityFilter) return false;
+        if (!q) return true;
+        const haystack = [
+          t.title,
+          t.description,
+          t.category,
+          t.type,
+          t.status,
+          t.priority,
+          t.created_by_name,
+          t.assigned_to_name,
+          t.id,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(q);
+      })
+      .sort((a, b) => {
+        const sa = statusRank[a.status || ''] ?? 99;
+        const sb = statusRank[b.status || ''] ?? 99;
+        if (sa !== sb) return sa - sb;
+        const pa = prioRank[a.priority || ''] ?? 99;
+        const pb = prioRank[b.priority || ''] ?? 99;
+        if (pa !== pb) return pa - pb;
+        return String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || ''));
+      });
+  }, [tickets, statusFilter, priorityFilter, search]);
 
   const openTicket = async (t: Ticket) => {
     selectedIdRef.current = t.id;
     setSelected(t);
-    setNewStatus(t.status || 'abierto');
     setComments([]);
     setCommentText('');
     setModalError('');
@@ -459,15 +536,6 @@ export default function App() {
         setModalError(err instanceof Error ? err.message : 'No se pudieron cargar los comentarios');
       }
     }
-  };
-
-  const closeTicket = () => {
-    selectedIdRef.current = null;
-    commentsSeq.current += 1;
-    setSelected(null);
-    setComments([]);
-    setCommentText('');
-    setModalError('');
   };
 
   const changeTicketStatus = async (ticketId: string, newStatus: Ticket['status']) => {
@@ -493,10 +561,7 @@ export default function App() {
     }
   };
 
-  const updateStatus = async () => {
-    if (!selected || updating || newStatus === selected.status) return;
-    await changeTicketStatus(selected.id, newStatus);
-  };
+  // cambio de estado se hace directo desde botones rápidos de la UI
 
   const sendComment = async () => {
     const text = commentText.trim();
@@ -750,6 +815,7 @@ export default function App() {
     try {
       await api(`/tickets/${id}`, { method: 'DELETE' });
       setTickets((prev) => prev.filter((t) => t.id !== id));
+      if (selectedIdRef.current === id) closeTicket();
     } catch (err) {
       setModalError(err instanceof Error ? err.message : 'No se pudo eliminar el ticket');
     } finally {
@@ -831,66 +897,127 @@ export default function App() {
   return (
     <div className="layout">
       <aside className="sidebar">
-        <h1 className="sidebar-title">Dev Tickets</h1>
-        <p className="sidebar-sub">Panel de soporte multi-proyecto</p>
+        <header className="sidebar-head">
+          <h1 className="sidebar-title">Dev Tickets</h1>
+          <p className="sidebar-sub">Panel de soporte multi-proyecto</p>
+        </header>
 
-        {projectsError ? (
-          <div className="alert" role="alert" style={{ marginTop: 'var(--space-4)' }}>
-            {projectsError}
+        <section className="sidebar-section" aria-label="Proyecto">
+          {projectsError ? (
+            <div className="alert" role="alert">{projectsError}</div>
+          ) : projects.length > 0 ? (
+            <>
+              <label className="label" htmlFor="project">
+                Proyecto
+              </label>
+              <select
+                id="project"
+                className="select"
+                value={projectId}
+                onChange={(e) => setProjectId(e.target.value)}
+              >
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+              {activeProject && <p className="project-url">{activeProject.baseUrl}</p>}
+            </>
+          ) : (
+            <p className="sidebar-sub">No hay proyectos configurados.</p>
+          )}
+        </section>
+
+        <section className="sidebar-section" aria-label="Filtros">
+          <div className="field">
+            <label className="label" htmlFor="search-tickets">Buscar</label>
+            <input
+              id="search-tickets"
+              className="input"
+              type="search"
+              placeholder="Título, descripción, id…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
           </div>
-        ) : projects.length > 0 ? (
-          <div style={{ marginTop: 'var(--space-4)' }}>
-            <label className="label" htmlFor="project">
-              Proyecto
-            </label>
+          <div className="field">
+            <label className="label" htmlFor="status-filter">Estado</label>
             <select
-              id="project"
+              id="status-filter"
               className="select"
-              value={projectId}
-              onChange={(e) => setProjectId(e.target.value)}
+              aria-label="Filtrar por estado"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
             >
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
+              <option value="all">Todos los estados</option>
+              <option value="abierto">Abierto</option>
+              <option value="en_progreso">En progreso</option>
+              <option value="resuelto">Resuelto</option>
+              <option value="cerrado">Cerrado</option>
             </select>
-            {activeProject && <p className="project-url">{activeProject.baseUrl}</p>}
           </div>
-        ) : (
-          <p className="sidebar-sub" style={{ marginTop: 'var(--space-4)' }}>
-            No hay proyectos configurados.
-          </p>
-        )}
+          <div className="field">
+            <label className="label" htmlFor="priority-filter">Prioridad</label>
+            <select
+              id="priority-filter"
+              className="select"
+              aria-label="Filtrar por prioridad"
+              value={priorityFilter}
+              onChange={(e) => setPriorityFilter(e.target.value)}
+            >
+              <option value="all">Todas las prioridades</option>
+              <option value="urgente">Urgente</option>
+              <option value="alta">Alta</option>
+              <option value="media">Media</option>
+              <option value="baja">Baja</option>
+            </select>
+          </div>
+          {(search || statusFilter !== 'all' || priorityFilter !== 'all') && (
+            <button
+              className="btn btn-ghost btn-sm"
+              type="button"
+              onClick={() => {
+                setSearch('');
+                setStatusFilter('all');
+                setPriorityFilter('all');
+              }}
+            >
+              Limpiar filtros
+            </button>
+          )}
+        </section>
 
-        <div className="filters">
-          <select
-            className="select"
-            aria-label="Filtrar por estado"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-          >
-            <option value="all">Todos los estados</option>
-            <option value="abierto">Abierto</option>
-            <option value="en_progreso">En progreso</option>
-            <option value="resuelto">Resuelto</option>
-            <option value="cerrado">Cerrado</option>
-          </select>
-          <select
-            className="select"
-            aria-label="Filtrar por prioridad"
-            value={priorityFilter}
-            onChange={(e) => setPriorityFilter(e.target.value)}
-          >
-            <option value="all">Todas las prioridades</option>
-            <option value="baja">Baja</option>
-            <option value="media">Media</option>
-            <option value="alta">Alta</option>
-            <option value="urgente">Urgente</option>
-          </select>
-        </div>
-
-        <div className="sidebar-actions">
+        <section className="sidebar-section" aria-label="Vista">
+          <div className="view-tabs" role="tablist" aria-label="Vista">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === 'list'}
+              className={`btn ${view === 'list' ? '' : 'btn-ghost'}`}
+              onClick={() => setView('list')}
+            >
+              Lista
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === 'kanban'}
+              className={`btn ${view === 'kanban' ? '' : 'btn-ghost'}`}
+              onClick={() => setView('kanban')}
+            >
+              Kanban
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === 'dashboard'}
+              className={`btn ${view === 'dashboard' ? '' : 'btn-ghost'}`}
+              onClick={() => setView('dashboard')}
+            >
+              Dashboard
+            </button>
+          </div>
           <button className="btn btn-secondary" onClick={() => loadTickets(true)} disabled={refreshing}>
             {refreshing ? (
               <>
@@ -901,25 +1028,15 @@ export default function App() {
               'Actualizar'
             )}
           </button>
-          <button
-            className="btn btn-ghost"
-            onClick={() => {
-              const next = view === 'list' ? 'dashboard' : view === 'dashboard' ? 'kanban' : 'list';
-              setView(next);
-            }}
-            title={view === 'list' ? 'Ver dashboard' : view === 'dashboard' ? 'Ver kanban' : 'Ver lista'}
-          >
-            {view === 'list' ? 'Dashboard' : view === 'dashboard' ? 'Kanban' : 'Lista'}
-          </button>
           <div className="sidebar-status">
             <span>
-              {filtered.length} {filtered.length === 1 ? 'ticket' : 'tickets'}
-              {statusFilter !== 'all' || priorityFilter !== 'all' ? ' (filtrados)' : ''}
+              {filtered.length} {filtered.length === 1 ? 'ticket visible' : 'tickets visibles'}
+              {tickets.length !== filtered.length ? ` de ${tickets.length}` : ''}
             </span>
             {lastUpdate && <span>Actualizado {formatClock(lastUpdate)}</span>}
             <span>Auto-refresco {selected ? '5' : '15'}s</span>
           </div>
-        </div>
+        </section>
 
         <div className="sidebar-footer">
           <button className="btn btn-ghost" onClick={logout}>
@@ -929,455 +1046,165 @@ export default function App() {
       </aside>
 
       <main className="main">
+        {listError && view === 'list' && (
+          <div className="alert" role="alert">
+            {listError}
+            <button
+              className="btn btn-secondary"
+              type="button"
+              onClick={() => loadTickets(true)}
+            >
+              Reintentar
+            </button>
+          </div>
+        )}
+
         {view === 'dashboard' ? (
-          <div className="dashboard">
-            <aside className="sidebar">
-              <h2 className="sidebar-title">Ticket Panel</h2>
-              <p className="sidebar-sub">
-                Soporte técnico · {activeProject?.name || projectId}
-              </p>
-
-              <nav aria-label="Proyectos" style={{ marginTop: 'var(--space-5)' }}>
-                {projects.map((pr) => {
-                  const active = pr.id === projectId;
-                  return (
-                    <button
-                      key={pr.id}
-                      className={`project-item ${active ? 'active' : ''}`}
-                      onClick={() => setProjectId(pr.id)}
-                    >
-                      <span className="project-dot" aria-hidden="true"></span>
-                      {pr.name}
-                    </button>
-                  );
-                })}
-              </nav>
-            </aside>
-
-            <main className="main">
-              <div className="filters">
-                <div>
-                  <label className="label">Proyecto</label>
-                  <select
-                    className="select"
-                    value={projectId}
-                    onChange={(e) => setProjectId(e.target.value)}
-                  >
-                    {projects.map((pr) => (
-                      <option key={pr.id} value={pr.id}>
-                        {pr.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="label">Estado</label>
-                  <select
-                    className="select"
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                  >
-                    <option value="all">Todos los estados</option>
-                    <option value="abierto">Abierto</option>
-                    <option value="en_progreso">En progreso</option>
-                    <option value="resuelto">Resuelto</option>
-                    <option value="cerrado">Cerrado</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="label">Prioridad</label>
-                  <select
-                    className="select"
-                    value={priorityFilter}
-                    onChange={(e) => setPriorityFilter(e.target.value)}
-                  >
-                    <option value="all">Todas las prioridades</option>
-                    <option value="baja">Baja</option>
-                    <option value="media">Media</option>
-                    <option value="alta">Alta</option>
-                    <option value="urgente">Urgente</option>
-                  </select>
-                </div>
-                <span className="query-hint">
-                  URL: ?project={projectId}&status={statusFilter}&priority={priorityFilter}
-                </span>
-              </div>
-
-              <div className="kpis">
-                <div className="kpi-card">
-                  <div className="kpi-title">Total de tickets</div>
-                  <div className="kpi-value" style={{ color: 'var(--text)' }}>
-                    {filtered.length}
-                  </div>
-                  <div className="kpi-sub">en el período</div>
-                </div>
-                <div className="kpi-card">
-                  <div className="kpi-title">Abiertos</div>
-                  <div className="kpi-value" style={{ color: 'var(--neon-primary)' }}>
-                    {filtered.filter((t) => t.status === 'abierto').length}
-                  </div>
-                </div>
-                <div className="kpi-card">
-                  <div className="kpi-title">En progreso</div>
-                  <div className="kpi-value" style={{ color: 'var(--prio-media)' }}>
-                    {filtered.filter((t) => t.status === 'en_progreso').length}
-                  </div>
-                </div>
-                <div className="kpi-card">
-                  <div className="kpi-title">Resueltos</div>
-                  <div className="kpi-value" style={{ color: 'var(--neon-success)' }}>
-                    {filtered.filter((t) => t.status === 'resuelto').length}
-                  </div>
-                </div>
-              </div>
-
-              <div className="charts">
-                <section className="card">
-                  <h3 className="chart-title">Tickets creados vs resueltos</h3>
-                  <div className="chart-wrap">
-                    <div className="empty">
-                      <h3>Gráfico de área</h3>
-                      <p>Gráfico de área disponible en vista dedicada.</p>
-                    </div>
-                  </div>
-                </section>
-                <section className="card">
-                  <h3 className="chart-title">Tickets por prioridad</h3>
-                  <div className="empty">
-                    <h3>Gráfico de barras</h3>
-                    <p>Gráfico de barras disponible en vista dedicada.</p>
-                  </div>
-                </section>
-              </div>
-
-              <section className="card">
-                <h3 className="chart-title">Últimos tickets</h3>
-                <div className="list">
-                  {filtered.slice(0, 8).map((t) => (
-                    <div
-                      key={t.id}
-                      className="ticket-card"
-                      role="button"
-                      tabIndex={0}
-                      aria-current={selected?.id === t.id}
-                      onClick={() => openTicket(t)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          openTicket(t);
-                        }
-                      }}
-                      style={{
-                        borderLeft: `4px solid ${
-                          safeGet(PRIORITY_COLOR, t.priority) || 'var(--border)'
-                        }`,
-                      }}
-                    >
-                      <div className="ticket-head">
-                        <span className="ticket-title">{t.title || 'Sin título'}</span>
-                        <span
-                          className="ticket-status"
-                          style={{ color: safeGet(STATUS_COLOR, t.status) || 'var(--text-muted)' }}
-                        >
-                          {(safeGet(STATUS_LABEL, t.status) ?? t.status) || 'Sin estado'}
-                        </span>
-                        <span
-                          className="badge"
-                          style={{ color: safeGet(TYPE_COLOR, t.type) || 'var(--text-muted)' }}
-                        >
-                          {(safeGet(TYPE_LABEL, t.type) ?? t.type) || 'Sin tipo'}
-                        </span>
-                      </div>
-                      <div className="ticket-meta">
-                        {t.created_by_name || 'operador'} · {formatDate(t.created_at)} · {
-                          t.category || 'Sin categoría'
-                        }
-                      </div>
-                      <div className="ticket-desc">
-                        {(t.description || '').slice(0, 120)}
-                        {(t.description || '').length > 120 ? '…' : ''}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            </main>
-          </div>
+          <DashboardView
+            tickets={tickets}
+            projectName={activeProject?.name ?? null}
+            statusFilter={statusFilter}
+            priorityFilter={priorityFilter}
+            loading={loading}
+            error={listError || null}
+            onRefresh={() => loadTickets(true)}
+          />
         ) : view === 'kanban' ? (
-          <div className="dashboard">
-            <aside className="sidebar">
-              <h2 className="sidebar-title">Ticket Panel</h2>
-              <p className="sidebar-sub">
-                Soporte técnico · {activeProject?.name || projectId}
-              </p>
-
-              <nav aria-label="Proyectos" style={{ marginTop: 'var(--space-5)' }}>
-                {projects.map((pr) => {
-                  const active = pr.id === projectId;
-                  return (
-                    <button
-                      key={pr.id}
-                      className={`project-item ${active ? 'active' : ''}`}
-                      onClick={() => setProjectId(pr.id)}
-                    >
-                      <span className="project-dot" aria-hidden="true"></span>
-                      {pr.name}
-                    </button>
-                  );
-                })}
-              </nav>
-            </aside>
-
-            <main className="main">
-              <div className="filters">
-                <div>
-                  <label className="label">Proyecto</label>
-                  <select
-                    className="select"
-                    value={projectId}
-                    onChange={(e) => setProjectId(e.target.value)}
-                  >
-                    {projects.map((pr) => (
-                      <option key={pr.id} value={pr.id}>
-                        {pr.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="label">Estado</label>
-                  <select
-                    className="select"
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                  >
-                    <option value="all">Todos los estados</option>
-                    <option value="abierto">Abierto</option>
-                    <option value="en_progreso">En progreso</option>
-                    <option value="resuelto">Resuelto</option>
-                    <option value="cerrado">Cerrado</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="label">Prioridad</label>
-                  <select
-                    className="select"
-                    value={priorityFilter}
-                    onChange={(e) => setPriorityFilter(e.target.value)}
-                  >
-                    <option value="all">Todas las prioridades</option>
-                    <option value="baja">Baja</option>
-                    <option value="media">Media</option>
-                    <option value="alta">Alta</option>
-                    <option value="urgente">Urgente</option>
-                  </select>
-                </div>
-                <span className="query-hint">
-                  URL: ?project={projectId}&status={statusFilter}&priority={priorityFilter}
-                </span>
-              </div>
-
-              <div className="kanban">
-                <div className="kanban-header">
-                  <h2 className="kanban-title">Tablero de tickets</h2>
-                  <span className="kanban-count">
-                    {filtered.length} ticket{filtered.length !== 1 ? 's' : ''}
-                  </span>
-                </div>
-
-                <div className="kanban-columns">
-                  {['abierto', 'en_progreso', 'resuelto', 'cerrado'].map((statusId) => {
-                    const columnTickets = filtered.filter((t) => t.status === statusId);
-                    return (
-                      <div
-                        key={statusId}
-                        className="kanban-column"
-                      >
-                        <div className="kanban-column-header">
-                          <h3 className="kanban-column-title" style={{ color: STATUS_COLOR[statusId] || 'var(--text-muted)' }}>
-                            {STATUS_LABEL[statusId] || statusId}
-                          </h3>
-                          <span className="kanban-column-count">{columnTickets.length}</span>
-                        </div>
-
-                        <div className="kanban-column-cards">
-                          {columnTickets.length === 0 ? (
-                            <div className="kanban-empty">
-                              <span className="kanban-empty-icon">—</span>
-                              <span className="kanban-empty-text">Sin tickets</span>
-                            </div>
-                          ) : (
-                            columnTickets.map((ticket) => (
-                              <article
-                                key={ticket.id}
-                                className="kanban-card"
-                                role="button"
-                                tabIndex={0}
-                                onClick={() => openTicket(ticket)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter' || e.key === ' ') {
-                                    e.preventDefault();
-                                    openTicket(ticket);
-                                  }
-                                }}
-                                style={{
-                                  borderLeft: `4px solid ${
-                                    safeGet(PRIORITY_COLOR, ticket.priority) || 'var(--border)'
-                                  }`,
-                                }}
-                              >
-                                <div className="kanban-card-header">
-                                  <span
-                                    className="kanban-card-type"
-                                    style={{ color: safeGet(TYPE_COLOR, ticket.type) || 'var(--text-muted)' }}
-                                  >
-                                    {(safeGet(TYPE_LABEL, ticket.type) ?? ticket.type) || 'Sin tipo'}
-                                  </span>
-                                  <span
-                                    className="kanban-card-priority"
-                                    style={{
-                                      color:
-                                        ticket.priority && PRIORITY_COLOR[ticket.priority]
-                                          ? PRIORITY_COLOR[ticket.priority]
-                                          : 'var(--text-muted)',
-                                    }}
-                                  >
-                                    {ticket.priority ? PRIORITY_LABEL[ticket.priority] : 'Sin prioridad'}
-                                  </span>
-                                </div>
-                                <h4 className="kanban-card-title">{ticket.title || 'Sin título'}</h4>
-                                <div className="kanban-card-meta">
-                                  <span className="kanban-card-category">{ticket.category || 'Sin categoría'}</span>
-                                  <span className="kanban-card-author">{ticket.created_by_name || 'operador'}</span>
-                                  <span className="kanban-card-date">{formatDate(ticket.created_at)}</span>
-                                </div>
-                                <div className="kanban-card-actions">
-                                  <button
-                                    className="kanban-move-btn kanban-move-prev"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      changeTicketStatus(ticket.id, 'abierto');
-                                    }}
-                                    disabled={ticket.status === 'abierto'}
-                                    aria-label="Mover a columna anterior"
-                                    title="Mover a columna anterior"
-                                  >
-                                    <span style={{ fontSize: '14px', lineHeight: 1 }}>&larr;</span>
-                                  </button>
-                                  <button
-                                    className="kanban-move-btn kanban-move-next"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      changeTicketStatus(ticket.id, 'cerrado');
-                                    }}
-                                    disabled={ticket.status === 'cerrado'}
-                                    aria-label="Mover a columna siguiente"
-                                    title="Mover a columna siguiente"
-                                  >
-                                    <span style={{ fontSize: '14px', lineHeight: 1 }}>&rarr;</span>
-                                  </button>
-                                </div>
-                              </article>
-                            ))
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </main>
-          </div>
+          <KanbanBoard
+            tickets={tickets
+              .filter((t) => {
+                if (priorityFilter !== 'all' && t.priority !== priorityFilter) return false;
+                const q = search.trim().toLowerCase();
+                if (!q) return true;
+                return [t.title, t.description, t.category, t.type, t.status, t.priority, t.created_by_name, t.id]
+                  .filter(Boolean)
+                  .join(' ')
+                  .toLowerCase()
+                  .includes(q);
+              })
+              .sort((a, b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')))}
+            onTicketClick={openTicket}
+            onStatusChange={(id, next) => changeTicketStatus(id, next)}
+          />
         ) : (
           <>
-            {listError && (
-              <div className="alert" role="alert" style={{ marginBottom: 'var(--space-4)' }}>
-                {listError}
-                <button
-                  className="btn btn-secondary"
-                  style={{ marginLeft: 'var(--space-3)' }}
-                  onClick={() => loadTickets(true)}
-                >
-                  Reintentar
-                </button>
+            <div className="view-head">
+              <div>
+                <h2 className="view-title">Tickets</h2>
+                <p className="view-sub">
+                  {activeProject?.name ?? 'Sin proyecto'} · {filtered.length} de {tickets.length}
+                </p>
               </div>
-            )}
-
+              {search && <span className="query-hint">Buscando “{search}”</span>}
+            </div>
             {!projectId ? (
-              <p className="empty">Elegí un proyecto para ver sus tickets.</p>
+              <div className="empty">
+                <h3>Elegí un proyecto</h3>
+                <p>Seleccioná uno en el panel de la izquierda para ver sus tickets.</p>
+              </div>
             ) : loading ? (
-              <p className="empty" role="status">
-                Cargando tickets…
-              </p>
+              <div className="empty" role="status">
+                <h3>Cargando tickets…</h3>
+                <p>Un momento mientras traigo los últimos cambios del servidor.</p>
+              </div>
             ) : filtered.length === 0 ? (
               <div className="empty">
-                <strong>Sin tickets en este filtro</strong>
-                {statusFilter !== 'all' || priorityFilter !== 'all' ? (
-                  <>
-                    <span>Probá con otro filtro.</span>
-                    <br />
-                    <button
-                      className="btn btn-ghost"
-                      style={{ marginTop: 'var(--space-3)' }}
-                      onClick={() => {
-                        setStatusFilter('all');
-                        setPriorityFilter('all');
-                      }}
-                    >
-                      Limpiar filtros
-                    </button>
-                  </>
-                ) : (
-                  <span>No hay tickets en este proyecto.</span>
+                <h3>No hay tickets para mostrar</h3>
+                <p>
+                  {tickets.length === 0
+                    ? 'Este proyecto no tiene tickets todavía.'
+                    : 'No hay resultados con la búsqueda o filtros actuales.'}
+                </p>
+                {(search || statusFilter !== 'all' || priorityFilter !== 'all') && (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    type="button"
+                    onClick={() => {
+                      setSearch('');
+                      setStatusFilter('all');
+                      setPriorityFilter('all');
+                    }}
+                  >
+                    Limpiar filtros
+                  </button>
                 )}
               </div>
             ) : (
               <div className="list">
                 {filtered.map((t) => (
-                  <div
+                  <article
                     key={t.id}
                     className="ticket-card"
-                    role="button"
-                    tabIndex={0}
-                    aria-current={selected?.id === t.id}
+                    data-priority={t.priority ?? 'none'}
+                    aria-current={selected?.id === t.id ? true : undefined}
                     onClick={() => openTicket(t)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        openTicket(t);
-                      }
-                    }}
-                    style={{
-                      borderLeft: `4px solid ${
-                        safeGet(PRIORITY_COLOR, t.priority) || 'var(--border)'
-                      }`,
-                    }}
                   >
-                    <div className="ticket-head">
-                      <span className="ticket-title">{t.title || 'Sin título'}</span>
-                      <span
-                        className="ticket-status"
-                        style={{ color: safeGet(STATUS_COLOR, t.status) || 'var(--text-muted)' }}
+                    <div className="ticket-card-top">
+                      <div className="ticket-badges">
+                        <Badge
+                          kind="status"
+                          value={t.status}
+                        >
+                          {(safeGet(STATUS_LABEL, t.status) ?? t.status) || 'Sin estado'}
+                        </Badge>
+                        <Badge kind="priority" value={t.priority}>
+                          {(safeGet(PRIORITY_LABEL, t.priority) ?? t.priority) || 'Sin prioridad'}
+                        </Badge>
+                        <Badge kind="type" value={t.type}>
+                          {(safeGet(TYPE_LABEL, t.type) ?? t.type) || 'Sin tipo'}
+                        </Badge>
+                      </div>
+                      <time className="ticket-date" dateTime={t.updated_at || t.created_at}>
+                        {formatDate(t.updated_at || t.created_at)}
+                      </time>
+                    </div>
+                    <h3 className="ticket-title">
+                      <button
+                        type="button"
+                        className="ticket-title-link"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openTicket(t);
+                        }}
                       >
-                        {(safeGet(STATUS_LABEL, t.status) ?? t.status) || 'Sin estado'}
+                        {t.title || 'Sin título'}
+                      </button>
+                    </h3>
+                    <p className="ticket-desc">
+                      {(t.description || '(sin descripción)').slice(0, 180)}
+                      {(t.description || '').length > 180 ? '…' : ''}
+                    </p>
+                    <div className="ticket-card-foot">
+                      <span className="ticket-meta">
+                        {t.category || 'Sin categoría'} · {t.created_by_name || 'operador'}
                       </span>
-                      <span
-                        className="badge"
-                        style={{ color: safeGet(TYPE_COLOR, t.type) || 'var(--text-muted)' }}
-                      >
-                        {(safeGet(TYPE_LABEL, t.type) ?? t.type) || 'Sin tipo'}
-                      </span>
+                      <div className="ticket-quick-actions" onClick={(e) => e.stopPropagation()}>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => openTicket(t)}>
+                          Abrir
+                        </button>
+                        {t.status !== 'en_progreso' && t.status !== 'cerrado' && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => changeTicketStatus(t.id, 'en_progreso')}
+                            disabled={updating}
+                          >
+                            Tomar
+                          </button>
+                        )}
+                        {t.status !== 'resuelto' && t.status !== 'cerrado' && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => changeTicketStatus(t.id, 'resuelto')}
+                            disabled={updating}
+                          >
+                            Resolver
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <div className="ticket-meta">
-                      {t.created_by_name || 'operador'} · {formatDate(t.created_at)} · {
-                        t.category || 'Sin categoría'
-                      }
-                    </div>
-                    <div className="ticket-desc">
-                      {(t.description || '').slice(0, 120)}
-                      {(t.description || '').length > 120 ? '…' : ''}
-                    </div>
-                  </div>
+                  </article>
                 ))}
               </div>
             )}
@@ -1396,9 +1223,16 @@ export default function App() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="modal-head">
-              <h2 className="modal-title" id="ticket-title">
-                {selected.title || 'Sin título'}
-              </h2>
+              <div>
+                <h2 className="modal-title" id="ticket-title">
+                  {selected.title || 'Sin título'}
+                </h2>
+                <p className="ticket-meta">
+                  {selected.category || 'Sin categoría'} ·
+                  {selected.created_by_name || 'operador'} ·
+                  {formatDate(selected.created_at)}
+                </p>
+              </div>
               <button
                 className="icon-btn"
                 ref={closeBtnRef}
@@ -1409,92 +1243,72 @@ export default function App() {
               </button>
             </div>
 
-            <div className="badges">
-              <span
-                className="badge"
-                style={{ color: safeGet(PRIORITY_COLOR, selected.priority) || 'var(--text-muted)' }}
-              >
-                Prioridad: {selected.priority || 'Sin prioridad'}
-              </span>
-              <span
-                className="badge"
-                style={{ color: safeGet(STATUS_COLOR, selected.status) || 'var(--text-muted)' }}
-              >
-                Estado: {(safeGet(STATUS_LABEL, selected.status) ?? selected.status) || 'Sin estado'}
-              </span>
-              <span
-                className="badge"
-                style={{ color: safeGet(TYPE_COLOR, selected.type) || 'var(--text-muted)' }}
-              >
-                Tipo: {(safeGet(TYPE_LABEL, selected.type) ?? selected.type) || 'Sin tipo'}
-              </span>
-              <span className="badge">Categoría: {selected.category || 'Sin categoría'}</span>
-              <span className="badge">Por: {selected.created_by_name || 'operador'}</span>
-            </div>
-
-            <p className="modal-desc">{selected.description || '(sin descripción)'}</p>
-
-            {modalError && (
-              <div className="alert" role="alert" style={{ marginTop: 'var(--space-3)' }}>
-                {modalError}
+            <div className="modal-body">
+              <div className="badges">
+                <Badge kind="priority" value={selected.priority}>
+                  Prioridad: {selected.priority || 'Sin prioridad'}
+                </Badge>
+                <Badge kind="status" value={selected.status}>
+                  Estado:
+                  {(safeGet(STATUS_LABEL, selected.status) ?? selected.status) || 'Sin estado'}
+                </Badge>
+                <Badge kind="type" value={selected.type}>
+                  Tipo: {(safeGet(TYPE_LABEL, selected.type) ?? selected.type) || 'Sin tipo'}
+                </Badge>
+                <span className="badge">Categoría: {selected.category || 'Sin categoría'}</span>
+                <span className="badge">Por: {selected.created_by_name || 'operador'}</span>
               </div>
-            )}
 
-            <div className="modal-actions">
-              <select
-                className="select"
-                aria-label="Nuevo estado del ticket"
-                value={newStatus || 'abierto'}
-                disabled={updating}
-                onChange={(e) => setNewStatus(e.target.value as Ticket['status'])}
-              >
-                <option value="abierto">Abierto</option>
-                <option value="en_progreso">En progreso</option>
-                <option value="resuelto">Resuelto</option>
-                <option value="cerrado">Cerrado</option>
-              </select>
-              <button
-                className="btn"
-                onClick={updateStatus}
-                disabled={updating || deleting || downloadingDiag || newStatus === selected.status}
-              >
-                {updating ? (
-                  <>
-                    <span className="spinner" aria-hidden="true" />
-                    Guardando…
-                  </>
-                ) : newStatus === selected.status ? (
-                  'Sin cambios'
-                ) : (
-                  'Cambiar estado'
-                )}
-              </button>
-              <button
-                className="btn btn-secondary"
-                onClick={downloadDiagnosticPackage}
-                disabled={downloadingDiag || deleting || updating}
-                title="Descarga ticket.md + adjuntos para diagnóstico"
-              >
-                {downloadingDiag ? (
-                  <>
-                    <span className="spinner" aria-hidden="true" />
-                    Generando…
-                  </>
-                ) : (
-                  'Descargar diagnóstico'
-                )}
-              </button>
-              <button
-                className="btn btn-danger"
-                onClick={() => { if (selected) { setConfirmPending(selected); closeTicket(); } }}
-                disabled={deleting || updating || downloadingDiag}
-              >
-                {deleting ? 'Eliminando…' : 'Eliminar'}
-              </button>
-            </div>
+              <p className="modal-desc">{selected.description || '(sin descripción)'}</p>
 
-            <h3 className="comments-title">Comentarios</h3>
-            <div className="comments">
+              {modalError && (
+                <div className="alert" role="alert">{modalError}</div>
+              )}
+
+              <div className="modal-actions">
+                <div className="status-quick-actions" role="group" aria-label="Cambiar estado rápidamente">
+                  {(['abierto', 'en_progreso', 'resuelto', 'cerrado'] as const).map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      className={`btn btn-sm ${selected.status === s ? '' : 'btn-ghost'}`}
+                      aria-pressed={selected.status === s ? true : undefined}
+                      onClick={() => changeTicketStatus(selected.id, s)}
+                      disabled={updating || deleting || downloadingDiag || selected.status === s}
+                    >
+                      {STATUS_LABEL[s]}
+                    </button>
+                  ))}
+                </div>
+                <div className="modal-actions-secondary">
+                  <button
+                    className="btn btn-secondary"
+                    onClick={downloadDiagnosticPackage}
+                    disabled={downloadingDiag || deleting || updating}
+                    title="Descarga ticket.md + adjuntos para diagnóstico"
+                  >
+                    {downloadingDiag ? (
+                      <>
+                        <span className="spinner" aria-hidden="true" />
+                        Generando…
+                      </>
+                    ) : (
+                      'Descargar diagnóstico'
+                    )}
+                  </button>
+                  <button
+                    className="btn btn-danger"
+                    onClick={() => { if (selected) setConfirmPending(selected); }}
+                    disabled={deleting || updating || downloadingDiag}
+                  >
+                    {deleting ? 'Eliminando…' : 'Eliminar'}
+                  </button>
+                </div>
+              </div>
+
+              <section aria-labelledby="comments-title">
+                <h3 className="comments-title" id="comments-title">Comentarios</h3>
+                <div className="comments">
               {comments.length === 0 && <p className="empty">Sin comentarios todavía.</p>}
               {comments.map((c) => (
                 <div key={c.id} className="comment">
@@ -1553,8 +1367,11 @@ export default function App() {
                 </div>
               ))}
             </div>
+            </section>
+          </div>
 
-            <div className="composer">
+          <footer className="modal-footer">
+          <div className="composer">
               <div className="composer-main">
                 <label className="sr-only" htmlFor="comment">
                   Escribir comentario
@@ -1631,6 +1448,7 @@ export default function App() {
                 </button>
               </div>
             </div>
+          </footer>
           </div>
         </div>
       )}

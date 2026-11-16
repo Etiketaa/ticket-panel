@@ -1,440 +1,250 @@
 /**
  * Dashboard de tickets — vista integrada con la API real del panel.
  *
- * Recibe datos como props (sin mocks internos) y renderiza métricas,
- * gráfico de área streaming y barras por prioridad.
+ * Es de solo contenido: App.tsx ya provee el shell (sidebar con proyecto,
+ * filtros, pestañas y refresco), así que acá no hay sidebar ni filtros
+ * duplicados. Recibe tickets crudos y aplica sus propios filtros de estado
+ * / prioridad para el cálculo de métricas y la lista de recientes.
  *
  * Stack: solo React + TypeScript + CSS nativo. Sin librerías de gráficos
  * ni de animación. Todo el color vive en los tokens de src/index.css.
  *
- * Toda la lectura de propiedades de tickets es defensiva: nunca se asume
- * que un campo existe. Los tickets de gesope pueden no tener type, priority,
- * category, created_at, resolved_at, description, created_by_name, etc.
+ * Toda la lectura de propiedades de tickets es defensiva.
  */
 import { useMemo } from 'react';
 import { AreaChart } from './AreaChart';
 import { BarChart } from './BarChart';
 import { KPICard } from './KPICard';
 import type { AreaSeries, BarItem, ChartPoint, KPI } from '../types';
+import type { Ticket } from '../../App';
 
-type Status = 'abierto' | 'en_progreso' | 'resuelto' | 'cerrado';
 type Priority = 'baja' | 'media' | 'alta' | 'urgente';
-type TicketType = 'bug' | 'mejora' | 'feature' | 'tarea';
 
-type Ticket = {
-  id: string;
-  title: string;
-  priority?: Priority | null | undefined;
-  status: Status | null | undefined;
-  type?: TicketType | null | undefined;
-  category?: string | null | undefined;
-  created_at?: string | null | undefined;
-  resolved_at?: string | null | undefined;
-  description?: string | null | undefined;
-  created_by_name?: string | null | undefined;
-};
+const PRIORITY_ORDER: Priority[] = ['urgente', 'alta', 'media', 'baja'];
 
-type Project = {
-  id: string;
-  name: string;
-};
-
-type DashboardViewProps = {
-  tickets: Ticket[];
-  projects: Project[];
-  projectId: string;
-  statusFilter: string;
-  priorityFilter: string;
-  loading: boolean;
-  error: string | null;
-  onRefresh: () => void;
-  onProjectChange: (id: string) => void;
-  onStatusFilterChange: (status: string) => void;
-  onPriorityFilterChange: (priority: string) => void;
-};
-
-const STATUS_LABEL: Record<string, string> = {
-  abierto: 'Abierto',
-  en_progreso: 'En progreso',
-  resuelto: 'Resuelto',
-  cerrado: 'Cerrado',
-};
-
-const PRIORITY_LABEL: Record<string, string> = {
+const PRIORITY_LABEL: Record<Priority, string> = {
   baja: 'Baja',
   media: 'Media',
   alta: 'Alta',
   urgente: 'Urgente',
 };
 
-const PRIORITY_COLOR: Record<string, string> = {
-  baja: 'var(--prio-baja)',
-  media: 'var(--prio-media)',
-  alta: 'var(--prio-alta)',
-  urgente: 'var(--prio-urgente)',
+type Props = {
+  tickets: Ticket[];
+  projectName?: string | null;
+  statusFilter: string;
+  priorityFilter: string;
+  loading: boolean;
+  error: string | null;
+  onRefresh: () => void;
 };
 
-function fmtDate(iso?: string | null): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleString('es-AR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-}
-
-function resolveMinutes(created?: string | null, resolved?: string | null): number | null {
-  if (!created || !resolved) return null;
-  const createdTime = new Date(created).getTime();
-  const resolvedTime = new Date(resolved).getTime();
-  if (Number.isNaN(createdTime) || Number.isNaN(resolvedTime)) return null;
-  return (resolvedTime - createdTime) / 1000 / 60;
-}
-
-/* ------------------------------------------------------------------ */
-/* Datos derivados de los tickets reales                              */
-/* ------------------------------------------------------------------ */
-
-function buildAreaSeries(tickets: Ticket[]): AreaSeries[] {
-  const now = new Date();
-  const buckets: Record<string, { creados: number; resueltos: number }> = {};
-  for (let h = 23; h >= 0; h--) {
-    const d = new Date(now);
-    d.setHours(h, 0, 0, 0);
-    const key = d.toISOString();
-    buckets[key] = { creados: 0, resueltos: 0 };
-  }
-  for (const t of tickets) {
-    if (!t.created_at) continue;
-    const bucketKey = new Date(t.created_at).toISOString();
-    if (buckets[bucketKey]) buckets[bucketKey].creados += 1;
-    if (t.resolved_at) {
-      const resolvedKey = new Date(t.resolved_at).toISOString();
-      if (buckets[resolvedKey]) buckets[resolvedKey].resueltos += 1;
-    }
-  }
-  const entries = Object.entries(buckets).sort(([a], [b]) => a.localeCompare(b));
-  const created: ChartPoint[] = [];
-  const resolved: ChartPoint[] = [];
-  for (const [key, vals] of entries) {
-    const d = new Date(key);
-    const t = d.toLocaleTimeString('es-AR', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    });
-    created.push({ t, v: vals.creados });
-    resolved.push({ t, v: vals.resueltos });
-  }
-  return [
-    { key: 'creados', label: 'Tickets creados', color: 'var(--neon-primary)', data: created },
-    { key: 'resueltos', label: 'Tickets resueltos', color: 'var(--success)', data: resolved },
-  ];
-}
-
-function buildBars(tickets: Ticket[]): BarItem[] {
-  const counts: Record<string, number> = { baja: 0, media: 0, alta: 0, urgente: 0 };
-  for (const t of tickets) {
-    if (t.priority && counts[t.priority] !== undefined) {
-      counts[t.priority] += 1;
-    }
-  }
-  return [
-    { label: 'Baja', value: counts.baja, color: 'var(--prio-baja)' },
-    { label: 'Media', value: counts.media, color: 'var(--prio-media)' },
-    { label: 'Alta', value: counts.alta, color: 'var(--prio-alta)' },
-    { label: 'Urgente', value: counts.urgente, color: 'var(--prio-urgente)' },
-  ];
-}
-
-/* ------------------------------------------------------------------ */
-/* Sub-componentos de estado                                          */
-/* ------------------------------------------------------------------ */
-
-function DashboardSkeleton() {
-  return (
-    <div className="dashboard">
-      <aside className="sidebar">
-        <div className="skeleton"><div className="skeleton-text lg" /></div>
-        <div className="skeleton"><div className="skeleton-text md" /></div>
-      </aside>
-      <main className="main">
-        <div className="filters">
-          <div className="skeleton"><div className="skeleton-text sm" /></div>
-          <div className="skeleton"><div className="skeleton-text sm" /></div>
-        </div>
-        <div className="kpis">
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="skeleton">
-              <div className="skeleton-big" />
-              <div className="skeleton-text sm" />
-              <div className="skeleton-text xs" />
-            </div>
-          ))}
-        </div>
-        <div className="charts">
-          <div className="skeleton skeleton-chart" />
-          <div className="skeleton skeleton-chart" />
-        </div>
-      </main>
-    </div>
+export default function DashboardView({
+  tickets,
+  projectName,
+  statusFilter,
+  priorityFilter,
+  loading,
+  error,
+  onRefresh,
+}: Props) {
+  const allTickets = useMemo(
+    () => tickets.filter((t) => Boolean(t.id)),
+    [tickets]
   );
-}
 
-function ErrorState({ error, onRetry }: { error: string; onRetry: () => void }) {
-  return (
-    <div className="dashboard">
-      <main className="main">
-        <div className="alert" role="alert">
-          <div className="alert-title">No se pudieron cargar los tickets</div>
-          <p>{error}</p>
-          <button className="btn btn-secondary" onClick={onRetry}>
-            Reintentar
-          </button>
-        </div>
-      </main>
-    </div>
-  );
-}
-
-function EmptyState({ onAction }: { onAction: () => void }) {
-  return (
-    <div className="dashboard">
-      <main className="main">
-        <section className="empty">
-          <h3>No hay tickets que mostrar</h3>
-          <p>
-            Con los filtros actuales no hay resultados. Cambiá los filtros.
-          </p>
-          <button className="btn" onClick={onAction}>
-            Limpiar filtros
-          </button>
-        </section>
-      </main>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Vista principal                                                    */
-/* ------------------------------------------------------------------ */
-
-export default function DashboardView(props: DashboardViewProps) {
-  const {
-    tickets,
-    projects,
-    projectId,
-    statusFilter,
-    priorityFilter,
-    loading,
-    error,
-    onRefresh,
-    onProjectChange,
-    onStatusFilterChange,
-    onPriorityFilterChange,
-  } = props;
-
-  const activeProject = projects.find((p) => p.id === projectId) || null;
-
-  // Filtrado defensivo: nunca asume que los campos existen
+  // El dashboard aplica sus propios filtros de estado/prioridad (distintos
+  // de la lista, que también busca por texto).
   const filtered = useMemo(() => {
-    return tickets.filter((t) => {
+    return allTickets.filter((t) => {
       if (statusFilter !== 'all' && t.status !== statusFilter) return false;
       if (priorityFilter !== 'all' && t.priority !== priorityFilter) return false;
       return true;
     });
-  }, [tickets, statusFilter, priorityFilter]);
+  }, [allTickets, statusFilter, priorityFilter]);
 
-  const total = filtered.length;
-  const abiertos = filtered.filter((t) => t.status === 'abierto').length;
-  const enProgreso = filtered.filter((t) => t.status === 'en_progreso').length;
-  const resueltos = filtered.filter((t) => t.status === 'resuelto').length;
+  const now = new Date();
+  const sevenDaysAgo = new Date(now);
+  sevenDaysAgo.setDate(now.getDate() - 6);
 
-  const times = filtered
-    .map((t) => resolveMinutes(t.created_at, t.resolved_at))
-    .filter((v): v is number => v !== null && Number.isFinite(v));
-  const promedio = times.length ? Math.round(times.reduce((a, b) => a + b, 0) / times.length) : null;
+  const openCount = filtered.filter((t) => t.status === 'abierto').length;
+  const inProgressCount = filtered.filter((t) => t.status === 'en_progreso').length;
+  const resolvedCount = filtered.filter((t) => t.status === 'resuelto').length;
+  const closedCount = filtered.filter((t) => t.status === 'cerrado').length;
+
+  const byPriority = PRIORITY_ORDER.reduce(
+    (acc, p) => { acc[p] = filtered.filter((t) => t.priority === p).length; return acc; },
+    {} as Record<Priority, number>
+  );
 
   const kpis: KPI[] = [
-    { title: 'Total de tickets', value: total, subtitle: 'en el período', color: 'var(--text)' },
-    { title: 'Abiertos', value: abiertos, color: 'var(--neon-primary)' },
-    { title: 'En progreso', value: enProgreso, color: 'var(--prio-media)' },
-    { title: 'Resueltos', value: resueltos, color: 'var(--success)' },
+    { title: 'Abiertos', value: openCount, tone: 'danger' },
+    { title: 'En progreso', value: inProgressCount, tone: 'accent' },
+    { title: 'Resueltos', value: resolvedCount, tone: 'success' },
+    { title: 'Cerrados', value: closedCount, tone: 'muted' },
+    { title: 'Urgentes', value: byPriority.urgente, tone: 'danger' },
+    { title: 'Total', value: filtered.length, tone: 'dim' },
+  ];
+
+  const labels = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(sevenDaysAgo);
+    d.setDate(sevenDaysAgo.getDate() + i);
+    return d.toISOString().slice(0, 10);
+  });
+
+  const createdByDay = labels.reduce(
+    (acc, label) => { acc[label] = 0; return acc; },
+    {} as Record<string, number>
+  );
+  const resolvedByDay = labels.reduce(
+    (acc, label) => { acc[label] = 0; return acc; },
+    {} as Record<string, number>
+  );
+
+  filtered.forEach((t) => {
+    const createdDay = t.created_at.slice(0, 10);
+    if (labels.includes(createdDay) && t.status !== 'cerrado') createdByDay[createdDay] += 1;
+    if (t.resolved_at && labels.includes(t.resolved_at.slice(0, 10))) resolvedByDay[t.resolved_at.slice(0, 10)] += 1;
+  });
+
+  const series: AreaSeries[] = [
     {
-      title: 'Cerrados',
-      value: total - abiertos - enProgreso - resueltos,
-      color: 'var(--text-muted)',
+      key: 'abiertos',
+      label: 'Abiertos / día',
+      color: 'var(--neon-primary)',
+      data: labels.map((t) => ({ t, v: createdByDay[t] })) as ChartPoint[],
     },
     {
-      title: 'Prom. resolución',
-      value: promedio === null ? '—' : `${promedio} min`,
-      subtitle: 'tiempo medio',
-      color: 'var(--text-dim)',
+      key: 'resueltos',
+      label: 'Resueltos / día',
+      color: 'var(--neon-success)',
+      data: labels.map((t) => ({ t, v: resolvedByDay[t] })) as ChartPoint[],
     },
   ];
 
-  const series = useMemo(() => buildAreaSeries(filtered), [filtered]);
-  const bars = useMemo(() => buildBars(filtered), [filtered]);
+  const barData: BarItem[] = PRIORITY_ORDER.map((p) => ({
+    label: PRIORITY_LABEL[p],
+    value: byPriority[p],
+    color: `var(--prio-${p})`,
+  }));
 
-  const params = new URLSearchParams(window.location.search);
-  params.set('project', projectId);
-  params.set('status', statusFilter);
-  params.set('priority', priorityFilter);
-  const queryHint = `?${params.toString()}`;
+  const recent = useMemo(
+    () =>
+      [...filtered]
+        .sort(
+          (a, b) =>
+            String(b.updated_at || b.created_at || '').localeCompare(
+              String(a.updated_at || a.created_at || '')
+            )
+        )
+        .slice(0, 10),
+    [filtered]
+  );
 
-  if (loading) return <DashboardSkeleton />;
-  if (error) return <ErrorState error={error} onRetry={onRefresh} />;
-  if (total === 0) return <EmptyState onAction={() => onPriorityFilterChange('all')} />;
+  if (loading) {
+    return (
+      <div className="dashboard" role="region" aria-label="Dashboard de tickets">
+        <div className="view-head">
+          <div>
+            <h2 className="view-title">Dashboard</h2>
+            <p className="view-sub">Cargando métricas…</p>
+          </div>
+        </div>
+        <div className="skeleton skeleton-big"></div>
+        <div className="skeleton skeleton-chart"></div>
+        <div className="skeleton skeleton-chart"></div>
+        <div className="skeleton skeleton-big"></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="dashboard" role="region" aria-label="Dashboard de tickets">
+        <div className="view-head">
+          <div>
+            <h2 className="view-title">Dashboard</h2>
+            <p className="view-sub">{projectName ?? 'Sin proyecto'}</p>
+          </div>
+        </div>
+        <div className="alert" role="alert">{error}</div>
+        <button className="btn" type="button" onClick={onRefresh}>
+          Reintentar
+        </button>
+      </div>
+    );
+  }
 
   return (
-    <div className="dashboard">
-      <aside className="sidebar">
-        <h2 className="sidebar-title">Ticket Panel</h2>
-        <p className="sidebar-sub">
-          Soporte técnico · {activeProject?.name || projectId}
-        </p>
-
-        <nav aria-label="Proyectos" style={{ marginTop: 'var(--space-5)' }}>
-          {projects.map((pr) => {
-            const active = pr.id === projectId;
-            return (
-              <button
-                key={pr.id}
-                className={`project-item ${active ? 'active' : ''}`}
-                onClick={() => onProjectChange(pr.id)}
-              >
-                <span className="project-dot" aria-hidden="true"></span>
-                {pr.name || 'Sin nombre'}
-              </button>
-            );
-          })}
-        </nav>
-      </aside>
-
-      <main className="main">
-        <div className="filters">
-          <div>
-            <label className="label">Proyecto</label>
-            <select
-              className="select"
-              value={projectId}
-              onChange={(e) => onProjectChange(e.target.value)}
-            >
-              {projects.map((pr) => (
-                <option key={pr.id} value={pr.id}>
-                  {pr.name || 'Sin nombre'}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="label">Estado</label>
-            <select
-              className="select"
-              value={statusFilter}
-              onChange={(e) => onStatusFilterChange(e.target.value)}
-            >
-              <option value="all">Todos los estados</option>
-              <option value="abierto">Abierto</option>
-              <option value="en_progreso">En progreso</option>
-              <option value="resuelto">Resuelto</option>
-              <option value="cerrado">Cerrado</option>
-            </select>
-          </div>
-          <div>
-            <label className="label">Prioridad</label>
-            <select
-              className="select"
-              value={priorityFilter}
-              onChange={(e) => onPriorityFilterChange(e.target.value)}
-            >
-              <option value="all">Todas las prioridades</option>
-              <option value="baja">Baja</option>
-              <option value="media">Media</option>
-              <option value="alta">Alta</option>
-              <option value="urgente">Urgente</option>
-            </select>
-          </div>
-          <span className="query-hint">
-            URL: {queryHint}
-          </span>
+    <div className="dashboard" role="region" aria-label="Dashboard de tickets">
+      <div className="view-head">
+        <div>
+          <h2 className="view-title">Dashboard</h2>
+          <p className="view-sub">
+            {projectName ?? 'Sin proyecto'} · {filtered.length} de {allTickets.length} tickets
+          </p>
         </div>
+      </div>
 
-        <div className="kpis">
-          {kpis.map((kpi, i) => (
-            <KPICard key={i} {...kpi} />
-          ))}
-        </div>
+      <div className="kpis">
+        {kpis.map((k) => (
+          <KPICard key={k.title} {...k} />
+        ))}
+      </div>
 
-        <div className="charts">
-          <section className="card">
-            <h3 className="chart-title">
-              Tickets creados vs resueltos · últimas 24 h
-            </h3>
+      <div className="charts">
+        <div className="card">
+          <div className="chart-title">Tickets creados por día (últimos 7 días)</div>
+          <div className="chart-wrap">
             <AreaChart
               series={series}
-              refreshIntervalMs={30000}
-              onRefresh={onRefresh}
-              aria-label="Tickets creados y resueltos en las últimas 24 horas"
+              aria-label="Tickets creados y resueltos por día"
             />
-          </section>
-
-          <section className="card">
-            <h3 className="chart-title">Tickets por prioridad</h3>
-            <BarChart
-              data={bars}
-              aria-label="Cantidad de tickets por prioridad"
-            />
-          </section>
+          </div>
         </div>
+        <div className="card">
+          <div className="chart-title">Tickets por prioridad</div>
+          <div className="chart-wrap">
+            <BarChart data={barData} aria-label="Tickets por prioridad" />
+          </div>
+        </div>
+      </div>
 
-        <section className="card">
-          <h3 className="chart-title">Últimos tickets</h3>
-          <div className="list">
-            {filtered.slice(0, 8).map((t) => (
-              <div
-                key={t.id || Math.random().toString(36).slice(2)}
-                className="list-item"
-                style={{
-                  borderLeft: `3px solid ${
-                    t.priority && PRIORITY_COLOR[t.priority]
-                      ? PRIORITY_COLOR[t.priority]
-                      : 'var(--border)'
-                  }`,
-                }}
-              >
-                <div className="list-title">{t.title || 'Sin título'}</div>
-                <div className="list-meta">
-                  <span
-                    className="badge"
-                    style={{
-                      backgroundColor:
-                        t.priority && PRIORITY_COLOR[t.priority]
-                          ? PRIORITY_COLOR[t.priority]
-                          : 'var(--border)',
-                      color: 'var(--bg)',
-                    }}
-                  >
-                    {t.priority ? PRIORITY_LABEL[t.priority] : 'Sin prioridad'}
-                  </span>
-                  <span
-                    className="badge"
-                    style={{ backgroundColor: 'var(--surface-hover)', color: 'var(--text)' }}
-                  >
-                    {t.status ? STATUS_LABEL[t.status] || t.status : 'Sin estado'}
-                  </span>
-                  <span>{fmtDate(t.created_at)}</span>
+      <div className="card">
+        <div className="chart-title">Últimos tickets</div>
+        <div className="recent-list">
+          {recent.length === 0 ? (
+            <div className="empty">
+              <p>Sin tickets recientes.</p>
+            </div>
+          ) : (
+            recent.map((t) => (
+              <div key={t.id} className="recent-item" data-priority={t.priority ?? 'none'}>
+                <div className="recent-main">
+                  <div className="recent-title">{t.title || 'Sin título'}</div>
+                  <div className="recent-meta">
+                    {t.category || 'Sin categoría'} · {t.created_by_name || 'operador'}
+                    <span className="recent-date">{formatDate(t.updated_at || t.created_at)}</span>
+                  </div>
                 </div>
               </div>
-            ))}
-          </div>
-        </section>
-      </main>
+            ))
+          )}
+        </div>
+      </div>
     </div>
   );
+}
+
+function formatDate(value?: string | null): string {
+  if (!value) return '—';
+  try {
+    return new Date(value).toLocaleDateString('es-AR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    });
+  } catch {
+    return value;
+  }
 }

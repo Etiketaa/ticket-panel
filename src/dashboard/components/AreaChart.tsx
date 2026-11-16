@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { areaPath, extent, linePath, niceTicks, scaleLinear } from '../utils/chartHelpers';
+import { useEffect, useRef } from 'react';
+import { areaPath, extent, linePath } from '../utils/chartHelpers';
 import type { AreaSeries } from '../types';
 
 interface AreaChartProps {
   series: AreaSeries[];
+  /** Ancho y alto del lienzo SVG (en unidades de usuario). El render es fluido. */
   width?: number;
   height?: number;
   /** Intervalo de auto-refresco en ms. Si se omite, no hay auto-refresh. */
@@ -15,7 +16,13 @@ interface AreaChartProps {
 
 const MARGIN = { top: 22, right: 16, bottom: 42, left: 52 };
 const MAX_X_LABELS = 8;
-const HOVER_THRESHOLD = 30; // px
+
+const LINE_COLORS = [
+  'var(--neon-primary)',
+  'var(--neon-secondary)',
+  'var(--neon-danger)',
+  'var(--neon-success)',
+] as const;
 
 export function AreaChart({
   series,
@@ -25,209 +32,127 @@ export function AreaChart({
   onRefresh,
   'aria-label': ariaLabel,
 }: AreaChartProps) {
-  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
-  const [hoverKey, setHoverKey] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
 
-  // Auto-refresh: solo vuelve a pedir datos al padre. No hay animación.
+  // Auto-refresco opcional para que el dashboard se sienta vivo sin recargar.
   useEffect(() => {
-    if (!refreshIntervalMs || !onRefresh) return undefined;
-    const id = setInterval(onRefresh, refreshIntervalMs);
-    return () => clearInterval(id);
+    if (!refreshIntervalMs || refreshIntervalMs < 1000) return;
+    const id = window.setInterval(() => onRefresh?.(), refreshIntervalMs);
+    return () => window.clearInterval(id);
   }, [refreshIntervalMs, onRefresh]);
 
-  const plotWidth = width - MARGIN.left - MARGIN.right;
-  const plotHeight = height - MARGIN.top - MARGIN.bottom;
-  const bottomY = MARGIN.top + plotHeight;
-
-  const values = series.flatMap((s) => s.data.map((p) => p.v));
-  const [, yMaxRaw] = extent(values);
-  const yMax = yMaxRaw === 0 ? 1 : yMaxRaw;
-  const yScale = scaleLinear([0, yMax], [bottomY, MARGIN.top]);
-  const yTicks = niceTicks(0, yMax, 5);
-
-  const n = series[0]?.data.length ?? 0;
-  const xScale = scaleLinear([0, Math.max(0, n - 1)], [MARGIN.left, MARGIN.left + plotWidth]);
-  const stepX = Math.max(1, Math.floor(n / MAX_X_LABELS));
-
-  const points = series.flatMap((s) =>
-    s.data.map((p, i) => ({
-      key: s.key,
-      x: xScale(i),
-      y: yScale(p.v),
-      v: p.v,
-      t: p.t,
-      i,
-    })),
-  );
-
-  const colorOf = useCallback(
-    (key: string) => series.find((s) => s.key === key)?.color ?? 'var(--text-muted)',
-    [series],
-  );
-  const labelOf = useCallback(
-    (key: string) => series.find((s) => s.key === key)?.label ?? key,
-    [series],
-  );
-
-  const handleMove = useCallback(
-    (ev: React.MouseEvent<SVGSVGElement>) => {
-      const svg = svgRef.current;
-      if (!svg) return;
-      const rect = svg.getBoundingClientRect();
-      const mx = ev.clientX - rect.left;
-      let best: typeof points[number] | null = null;
-      let bestDist = Infinity;
-      for (const p of points) {
-        const d = Math.abs(p.x - mx);
-        if (d <= HOVER_THRESHOLD && d < bestDist) {
-          bestDist = d;
-          best = p;
-        }
-      }
-      setHoverIndex(best?.i ?? null);
-      setHoverKey(best?.key ?? null);
-    },
-    [points],
-  );
-
-  const hoverPoint = points.find((p) => p.i === hoverIndex && p.key === hoverKey) ?? null;
-
   return (
-    <div className="chart-wrap" style={{ width, height }}>
+    <div className="chart-wrap" style={{ minHeight: height }}>
       <svg
         ref={svgRef}
-        width={width}
-        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="xMidYMid meet"
         role="img"
-        aria-label={
-          ariaLabel ?? 'Tickets creados vs resueltos en las últimas 24 horas'
-        }
-        onMouseMove={handleMove}
-        onMouseLeave={() => {
-          setHoverIndex(null);
-          setHoverKey(null);
-        }}
-        style={{ display: 'block', background: 'var(--surface)' }}
+        aria-label={ariaLabel}
+        style={{ width: '100%', height: 'auto', display: 'block' }}
       >
-        <title id="area-title">{ariaLabel ?? 'Gráfico de área de tickets'}</title>
-        <desc id="area-desc">
-          Eje X: hora del día. Eje Y: cantidad de tickets. Área violeta: tickets
-          creados. Línea verde: tickets resueltos.
-        </desc>
         <defs>
-          <linearGradient id="grad-area" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="var(--neon-primary)" stop-opacity="0.25" />
-            <stop offset="100%" stop-color="var(--neon-primary)" stop-opacity="0.02" />
+          <linearGradient id="grad-area" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="var(--neon-primary)" stopOpacity="0.25" />
+            <stop offset="100%" stopColor="var(--neon-primary)" stopOpacity="0" />
           </linearGradient>
         </defs>
 
-        {/* Líneas de grid del eje Y */}
-        {yTicks.map((tick) => {
-          const y = yScale(tick);
-          return (
+        <g>
+          {series.map((s, si) => {
+            const pts = s.data;
+            if (pts.length < 2) return null;
+            const color = s.color || LINE_COLORS[si % LINE_COLORS.length];
+
+            const ys = pts.map((p) => p.v);
+            const [yMin, yMax] = extent(ys);
+
+            const last = Math.max(1, pts.length - 1);
+            const sx = (i: number) =>
+              MARGIN.left + (i / last) * (width - MARGIN.left - MARGIN.right);
+            const spanY = Math.max(1, yMax - yMin);
+            const sy = (v: number) =>
+              height -
+              MARGIN.bottom -
+              ((v - yMin) / spanY) * (height - MARGIN.top - MARGIN.bottom);
+
+            const points = pts.map((p, i) => ({ x: sx(i), y: sy(p.v) }));
+            return (
+              <g key={s.key}>
+                <path
+                  d={areaPath(points, height - MARGIN.bottom)}
+                  fill="url(#grad-area)"
+                  stroke="none"
+                />
+                <path d={linePath(points)} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                {pts.map((_p, i) => (
+                  <circle
+                    key={i}
+                    cx={sx(i)}
+                    cy={sy(pts[i]?.v ?? 0)}
+                    r={3}
+                    fill="var(--bg)"
+                    stroke={color}
+                    strokeWidth="2"
+                  />
+                ))}
+              </g>
+            );
+          })}
+
+          {/* Ejes */}
+          <g stroke="var(--border)" strokeWidth="1">
             <line
-              key={tick}
               x1={MARGIN.left}
-              x2={MARGIN.left + plotWidth}
-              y1={y}
-              y2={y}
-              stroke="var(--border)"
-              stroke-opacity="0.3"
+              y1={height - MARGIN.bottom}
+              x2={width - MARGIN.right}
+              y2={height - MARGIN.bottom}
             />
-          );
-        })}
+            <line
+              x1={MARGIN.left}
+              y1={MARGIN.top}
+              x2={MARGIN.left}
+              y2={height - MARGIN.bottom}
+            />
+          </g>
 
-        {/* Etiquetas del eje Y */}
-        {yTicks.map((tick) => (
-          <text
-            key={tick}
-            x={MARGIN.left - 8}
-            y={yScale(tick) + 4}
-            text-anchor="end"
-            className="axis-label"
+          {/* Etiquetas del eje X */}
+          <g
+            fontSize="var(--font-xs)"
+            fontFamily="var(--font-mono)"
+            fill="var(--text-muted)"
+            textAnchor="middle"
           >
-            {tick}
-          </text>
-        ))}
-
-        {/* Áreas (relleno + trazo) */}
-        {series.map((s) => {
-          const pts = s.data.map((p, i) => ({ x: xScale(i), y: yScale(p.v) }));
-          return (
-            <path
-              key={s.key}
-              d={areaPath(pts, bottomY)}
-              fill="url(#grad-area)"
-              stroke={s.color}
-              stroke-width="2"
-              fill-opacity="0.2"
-            >
-              <title>{`${labelOf(s.key)}: ${s.data.length} puntos`}</title>
-            </path>
-          );
-        })}
-
-        {/* Línea de la segunda serie (resueltos) sobre el área */}
-        {series.length > 1 && (
-          <path
-            d={linePath(series[1].data.map((p, i) => ({ x: xScale(i), y: yScale(p.v) })))}
-            fill="none"
-            stroke={series[1].color}
-            stroke-width="2"
-          />
-        )}
-
-        {/* Punto bajo el cursor */}
-        {hoverPoint && (
-          <circle
-            cx={hoverPoint.x}
-            cy={hoverPoint.y}
-            r="4"
-            fill={colorOf(hoverPoint.key)}
-            stroke="var(--bg)"
-            stroke-width="1.5"
-          />
-        )}
-
-        {/* Ejes */}
-        <path
-          d={`M${MARGIN.left} ${MARGIN.top} L${MARGIN.left} ${bottomY} L${MARGIN.left + plotWidth} ${bottomY}`}
-          fill="none"
-          stroke="var(--border)"
-          stroke-width="1"
-        />
-
-        {/* Etiquetas del eje X (espaciadas para no apretujarse) */}
-        {series[0]?.data.map((p, i) => {
-          if (i % stepX !== 0) return null;
-          return (
-            <text
-              key={`x-${i}`}
-              x={xScale(i)}
-              y={bottomY + 16}
-              text-anchor="middle"
-              className="axis-label"
-            >
-              {p.t}
-            </text>
-          );
-        })}
+            {xLabels(series[0]?.data ?? [], width, MARGIN, MAX_X_LABELS).map(
+              (lab) => (
+                <text key={lab.label} x={lab.x} y={height - MARGIN.bottom + 16}>
+                  {lab.label}
+                </text>
+              )
+            )}
+          </g>
+        </g>
       </svg>
-
-      {/* Tooltip HTML (posicionado con left/top en px) */}
-      {hoverPoint && (
-        <div
-          className="tooltip show"
-          style={{
-            left: hoverPoint.x - 55,
-            top: hoverPoint.y - 34,
-          } as CSSProperties}
-        >
-          <strong>{labelOf(hoverPoint.key)}</strong>
-          {hoverPoint.t} — {hoverPoint.v} ticket{hoverPoint.v !== 1 ? 's' : ''}
-        </div>
-      )}
     </div>
   );
+}
+
+function xLabels(
+  pts: { t: string; v: number }[],
+  width: number,
+  margin: { left: number; right: number },
+  maxLabels: number
+): { label: string; x: number }[] {
+  const step = Math.max(1, Math.floor(pts.length / maxLabels));
+  const plotW = width - margin.left - margin.right;
+  const labels: { label: string; x: number }[] = [];
+  pts.forEach((_p, i) => {
+    if (i % step === 0 || i === pts.length - 1) {
+      labels.push({
+        label: String(pts[i]?.t ?? ''),
+        x: margin.left + i * (plotW / Math.max(1, pts.length - 1)),
+      });
+    }
+  });
+  return labels;
 }

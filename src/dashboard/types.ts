@@ -15,10 +15,19 @@ export type BarItem = {
 
 export type KPITrend = { label: string; up: boolean };
 
+export type KPITone =
+  | 'neutral'
+  | 'accent'
+  | 'warning'
+  | 'success'
+  | 'muted'
+  | 'danger'
+  | 'dim';
+
 export type KPI = {
   title: string;
   value: string | number;
   subtitle?: string;
   trend?: KPITrend;
-  color?: string;
+  tone?: KPITone;
 };

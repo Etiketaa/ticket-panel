@@ -3,12 +3,21 @@ import type { BarItem } from '../types';
 
 interface BarChartProps {
   data: BarItem[];
+  /** Ancho y alto del lienzo SVG (en unidades de usuario). El render es fluido. */
   width?: number;
   height?: number;
   'aria-label'?: string;
 }
 
 const MARGIN = { top: 22, right: 16, bottom: 44, left: 44 };
+
+const BAR_COLORS = [
+  'var(--neon-primary)',
+  'var(--neon-secondary)',
+  'var(--neon-danger)',
+  'var(--neon-success)',
+  'var(--prio-media)',
+] as const;
 
 export function BarChart({ data, width = 520, height = 260, 'aria-label': ariaLabel }: BarChartProps) {
   const values = data.map((d) => d.value);
@@ -19,104 +28,88 @@ export function BarChart({ data, width = 520, height = 260, 'aria-label': ariaLa
   const plotWidth = width - MARGIN.left - MARGIN.right;
   const plotHeight = height - MARGIN.top - MARGIN.bottom;
   const bottomY = MARGIN.top + plotHeight;
-  const yScale = scaleLinear([0, max], [plotHeight, 0]); // px desde el tope del área de plot
+  const yScale = scaleLinear([0, max] as [number, number], [plotHeight, 0]); // px desde el tope del área de plot
   const step = plotWidth / Math.max(1, data.length);
   const barW = step * 0.55;
 
   return (
-    <div className="chart-wrap" style={{ width, height }}>
+    <div className="chart-wrap" style={{ minHeight: height }}>
       <svg
-        width={width}
-        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="xMidYMid meet"
         role="img"
-        aria-label={ariaLabel ?? 'Gráfico de barras de tickets'}
-        style={{ display: 'block' }}
+        aria-label={ariaLabel}
+        style={{ width: '100%', height: 'auto', display: 'block' }}
       >
-        <title id="bar-title">{ariaLabel ?? 'Gráfico de barras de tickets'}</title>
-        <desc id="bar-desc">
-          Cada barra representa una prioridad o categoría. La altura es proporcional
-          a la cantidad de tickets y el valor está escrito encima de cada barra.
-        </desc>
+        {/* Ejes */}
+        <g stroke="var(--border)" strokeWidth="1">
+          <line x1={MARGIN.left} y1={bottomY} x2={width - MARGIN.right} y2={bottomY} />
+          <line x1={MARGIN.left} y1={MARGIN.top} x2={MARGIN.left} y2={bottomY} />
+        </g>
 
-        {/* Grid y etiquetas del eje Y */}
-        {yTicks.map((tick) => {
-          const py = yScale(tick);
-          const y = MARGIN.top + py;
-          return (
-            <>
-              <line
-                key={tick}
-                x1={MARGIN.left}
-                x2={MARGIN.left + plotWidth}
-                y1={y}
-                y2={y}
-                stroke="var(--border)"
-                stroke-opacity="0.3"
-              />
-              <text
-                key={`y-${tick}`}
-                x={MARGIN.left - 8}
-                y={y + 4}
-                text-anchor="end"
-                className="axis-label"
-              >
+        {/* Etiquetas del eje Y */}
+        <g
+          fontSize="var(--font-xs)"
+          fontFamily="var(--font-mono)"
+          fill="var(--text-muted)"
+          textAnchor="end"
+        >
+          {yTicks.map((tick) => {
+            const y = bottomY - yScale(tick);
+            return (
+              <text key={tick} x={MARGIN.left - 6} y={y + 4}>
                 {tick}
               </text>
-            </>
-          );
-        })}
+            );
+          })}
+        </g>
 
-        {/* Barras + etiquetas de valor */}
-        {data.map((d, i) => {
-          const h = yScale(d.value);
-          const x = MARGIN.left + i * step + (step - barW) / 2;
-          const y = bottomY - h;
-          return (
-            <g key={i} className="bar-group">
-              <rect
-                x={x}
-                y={y}
-                width={barW}
-                height={Math.max(0, h)}
-                fill={d.color ?? 'var(--text-muted)'}
-              >
-                <title>
-                  {`${d.label}: ${d.value} ticket${d.value !== 1 ? 's' : ''}`}
-                </title>
-              </rect>
-              {d.value > 0 && (
+        {/* Barras */}
+        <g>
+          {data.map((d, i) => {
+            const x = MARGIN.left + i * step + (step - barW) / 2;
+            const h = yScale(d.value);
+            const y = bottomY - h;
+            const color = d.color || BAR_COLORS[i % BAR_COLORS.length];
+            return (
+              <g key={d.label}>
+                <rect
+                  x={x}
+                  y={y}
+                  width={barW}
+                  height={Math.max(1, h)}
+                  fill={color}
+                  rx={2}
+                  ry={2}
+                />
                 <text
-                  x={x + barW / 2}
-                  y={y - 8}
                   className="bar-label"
+                  x={x + barW / 2}
+                  y={y - 6}
+                  fontSize="var(--font-xs)"
+                  fontFamily="var(--font-mono)"
+                  fill="var(--text-dim)"
                 >
                   {d.value}
                 </text>
-              )}
-            </g>
-          );
-        })}
-
-        {/* Ejes */}
-        <path
-          d={`M${MARGIN.left} ${MARGIN.top} L${MARGIN.left} ${bottomY} L${MARGIN.left + plotWidth} ${bottomY}`}
-          fill="none"
-          stroke="var(--border)"
-          stroke-width="1"
-        />
+              </g>
+            );
+          })}
+        </g>
 
         {/* Etiquetas del eje X */}
-        {data.map((d, i) => (
-          <text
-            key={`x-${i}`}
-            x={MARGIN.left + i * step + step / 2}
-            y={bottomY + 18}
-            text-anchor="middle"
-            className="axis-label"
-          >
-            {d.label}
-          </text>
-        ))}
+        <g
+          fontSize="var(--font-xs)"
+          fontFamily="var(--font-mono)"
+          fill="var(--text-muted)"
+          textAnchor="middle"
+        >
+          {data.map((d, i) => (
+            <text key={d.label} x={MARGIN.left + i * step + step / 2} y={bottomY + 16}>
+              {d.label}
+            </text>
+          ))}
+        </g>
       </svg>
     </div>
   );
