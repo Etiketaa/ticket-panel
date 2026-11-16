@@ -6,6 +6,7 @@
  */
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import JSZip from 'jszip';
 import { prepararAdjunto, type AdjuntoPreparado } from './utils/adjuntos.ts';
 
 export type Ticket = {
@@ -173,6 +174,7 @@ export default function App() {
   const [sending, setSending] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [downloadingDiag, setDownloadingDiag] = useState(false);
   const [confirmPending, setConfirmPending] = useState<Ticket | null>(null);
   const [modalError, setModalError] = useState('');
   const [newStatus, setNewStatus] = useState<Ticket['status']>('abierto');
@@ -612,6 +614,130 @@ export default function App() {
     (a: Attachment) => String(a.file_url || '').startsWith('data:'),
     []
   );
+
+  /**
+   * Descarga un paquete de diagnóstico del ticket seleccionado:
+   * ticket.md (contexto completo) + adjuntos/ (capturas y archivos).
+   * Pensado para compartir con un agente/IA sin copiar y pegar.
+   */
+  const downloadDiagnosticPackage = async () => {
+    if (!selected || downloadingDiag) return;
+    busyRef.current = true;
+    setDownloadingDiag(true);
+    setModalError('');
+    try {
+      // Traer todos los adjuntos del ticket (incluye los no colgados a comentarios).
+      let allAttachments: Attachment[] = [];
+      try {
+        const data = await api(`/tickets/${selected.id}/attachments`);
+        allAttachments = Array.isArray(data) ? data : [];
+      } catch {
+        // Fallback: usar los adjuntos de los comentarios cargados.
+        allAttachments = comments.flatMap((c) => c.attachments || []);
+      }
+
+      // Dedupe por id
+      const seen = new Set<string>();
+      allAttachments = allAttachments.filter((a) => {
+        if (!a?.id || seen.has(a.id)) return false;
+        seen.add(a.id);
+        return true;
+      });
+
+      const project = projects.find((p) => p.id === projectId);
+      const lines: string[] = [];
+      lines.push(`# Diagnóstico de ticket`);
+      lines.push('');
+      lines.push(`- Proyecto: ${project?.name || projectId || '—'} (${project?.baseUrl || '—'})`);
+      lines.push(`- Ticket ID: ${selected.id}`);
+      lines.push(`- Título: ${selected.title || '—'}`);
+      lines.push(`- Estado: ${selected.status || '—'}`);
+      lines.push(`- Prioridad: ${selected.priority || '—'}`);
+      lines.push(`- Categoría: ${selected.category || '—'}`);
+      lines.push(`- Tipo: ${selected.type || '—'}`);
+      lines.push(`- Creado por: ${selected.created_by_name || selected.created_by || '—'}`);
+      lines.push(`- Asignado a: ${selected.assigned_to_name || selected.assigned_to || '—'}`);
+      lines.push(`- Creado: ${formatDate(selected.created_at)}`);
+      lines.push(`- Actualizado: ${formatDate(selected.updated_at)}`);
+      lines.push(`- Resuelto: ${formatDate(selected.resolved_at)}`);
+      lines.push(`- Origen: ${selected.source || '—'}`);
+      lines.push('');
+      lines.push(`## Descripción`);
+      lines.push('');
+      lines.push(selected.description || '(sin descripción)');
+      lines.push('');
+      lines.push(`## Comentarios (${comments.length})`);
+      lines.push('');
+      if (comments.length === 0) {
+        lines.push('(sin comentarios)');
+      } else {
+        comments.forEach((c, i) => {
+          lines.push(`### ${i + 1}. ${c.author_name || c.author_id || 'usuario'} — ${formatDate(c.created_at)}`);
+          lines.push('');
+          lines.push(c.body || '(sin texto)');
+          if (Array.isArray(c.attachments) && c.attachments.length > 0) {
+            lines.push('');
+            lines.push(`Adjuntos en este comentario: ${c.attachments.map((a) => a.file_name).join(', ')}`);
+          }
+          lines.push('');
+        });
+      }
+      lines.push(`## Adjuntos (${allAttachments.length})`);
+      lines.push('');
+      if (allAttachments.length === 0) {
+        lines.push('(sin adjuntos)');
+      } else {
+        allAttachments.forEach((a, i) => {
+          const donde = a.comment_id ? `comentario ${a.comment_id}` : 'ticket';
+          lines.push(`- ${i + 1}. ${a.file_name} (${a.mime_type || 'tipo desconocido'}) — ${donde} — ${formatDate(a.uploaded_at)}`);
+        });
+      }
+      lines.push('');
+      lines.push(`---`);
+      lines.push(`Generado: ${new Date().toISOString()}`);
+
+      const zip = new JSZip();
+      zip.file('ticket.md', lines.join('\n'));
+      const folder = zip.folder('adjuntos');
+
+      const sanitize = (name: string) =>
+        String(name || 'archivo').replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 120) || 'archivo';
+
+      for (let i = 0; i < allAttachments.length; i++) {
+        const a = allAttachments[i];
+        // Saltar previews locales (data:)
+        if (String(a.file_url || '').startsWith('data:')) continue;
+        try {
+          const url = attachmentUrl(a);
+          const res = await fetch(url);
+          if (!res.ok) {
+            folder?.file(`${String(i + 1).padStart(2, '0')}-ERROR-${sanitize(a.file_name)}.txt`, `No se pudo descargar: HTTP ${res.status}`);
+            continue;
+          }
+          const blob = await res.blob();
+          folder?.file(`${String(i + 1).padStart(2, '0')}-${sanitize(a.file_name)}`, blob);
+        } catch (e: any) {
+          folder?.file(`${String(i + 1).padStart(2, '0')}-ERROR-${sanitize(a.file_name)}.txt`, `Error: ${e?.message || String(e)}`);
+        }
+      }
+
+      const outBlob = await zip.generateAsync({ type: 'blob' });
+      const outUrl = URL.createObjectURL(outBlob);
+      const link = document.createElement('a');
+      const safeTitle = sanitize(selected.title || 'ticket').slice(0, 40);
+      link.href = outUrl;
+      link.download = `diagnostico-${projectId || 'app'}-${selected.id.slice(-8)}-${safeTitle}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(outUrl);
+    } catch (err) {
+      setModalError(err instanceof Error ? err.message : 'No se pudo generar el paquete de diagnóstico');
+    } finally {
+      busyRef.current = false;
+      setDownloadingDiag(false);
+    }
+  };
 
   const confirmDelete = async () => {
     if (!confirmPending || deleting) return;
@@ -1330,7 +1456,7 @@ export default function App() {
               <button
                 className="btn"
                 onClick={updateStatus}
-                disabled={updating || deleting || newStatus === selected.status}
+                disabled={updating || deleting || downloadingDiag || newStatus === selected.status}
               >
                 {updating ? (
                   <>
@@ -1344,9 +1470,24 @@ export default function App() {
                 )}
               </button>
               <button
+                className="btn btn-secondary"
+                onClick={downloadDiagnosticPackage}
+                disabled={downloadingDiag || deleting || updating}
+                title="Descarga ticket.md + adjuntos para diagnóstico"
+              >
+                {downloadingDiag ? (
+                  <>
+                    <span className="spinner" aria-hidden="true" />
+                    Generando…
+                  </>
+                ) : (
+                  'Descargar diagnóstico'
+                )}
+              </button>
+              <button
                 className="btn btn-danger"
                 onClick={() => { if (selected) { setConfirmPending(selected); closeTicket(); } }}
-                disabled={deleting || updating}
+                disabled={deleting || updating || downloadingDiag}
               >
                 {deleting ? 'Eliminando…' : 'Eliminar'}
               </button>
