@@ -8,7 +8,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import JSZip from 'jszip';
 import { prepararAdjunto, type AdjuntoPreparado } from './utils/adjuntos.ts';
-import DashboardView from './dashboard/components/DashboardView.tsx';
 import { KanbanBoard } from './dashboard/components/KanbanBoard.tsx';
 
 export type Ticket = {
@@ -57,13 +56,6 @@ type Project = {
   baseUrl: string;
 };
 
-const PRIORITY_LABEL: Record<string, string> = {
-  baja: 'Baja',
-  media: 'Media',
-  alta: 'Alta',
-  urgente: 'Urgente',
-};
-
 const STATUS_LABEL: Record<string, string> = {
   abierto: 'Abierto',
   en_progreso: 'En progreso',
@@ -86,7 +78,6 @@ function readUrlFilters() {
     project: params.get('project') || '',
     status: params.get('status') || 'all',
     priority: params.get('priority') || 'all',
-    view: (params.get('view') as 'list' | 'dashboard' | 'kanban' | null) || 'list',
     q: params.get('q') || '',
   };
 }
@@ -175,10 +166,6 @@ export default function App() {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [statusFilter, setStatusFilter] = useState(() => readUrlFilters().status);
   const [priorityFilter, setPriorityFilter] = useState(() => readUrlFilters().priority);
-  const [view, setView] = useState<'list' | 'dashboard' | 'kanban'>(() => {
-    const v = readUrlFilters().view;
-    return v === 'dashboard' || v === 'kanban' ? v : 'list';
-  });
   const [search, setSearch] = useState(() => readUrlFilters().q);
   const [selected, setSelected] = useState<Ticket | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
@@ -475,12 +462,11 @@ export default function App() {
     if (projectId) params.set('project', projectId);
     if (statusFilter !== 'all') params.set('status', statusFilter);
     if (priorityFilter !== 'all') params.set('priority', priorityFilter);
-    if (view !== 'list') params.set('view', view);
     if (search.trim()) params.set('q', search.trim());
     const qs = params.toString();
     const next = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
     window.history.replaceState(null, '', next);
-  }, [auth, projectId, statusFilter, priorityFilter, view, search]);
+  }, [auth, projectId, statusFilter, priorityFilter, search]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -517,6 +503,16 @@ export default function App() {
         return String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || ''));
       });
   }, [tickets, statusFilter, priorityFilter, search]);
+
+  const kpis = useMemo(
+    () => [
+      { title: 'Abiertos', value: filtered.filter((t) => t.status === 'abierto').length, tone: 'danger' as const },
+      { title: 'En progreso', value: filtered.filter((t) => t.status === 'en_progreso').length, tone: 'accent' as const },
+      { title: 'Resueltos', value: filtered.filter((t) => t.status === 'resuelto').length, tone: 'success' as const },
+      { title: 'Urgentes', value: filtered.filter((t) => t.priority === 'urgente').length, tone: 'warning' as const },
+    ],
+    [filtered]
+  );
 
   const openTicket = async (t: Ticket) => {
     selectedIdRef.current = t.id;
@@ -988,36 +984,7 @@ export default function App() {
           )}
         </section>
 
-        <section className="sidebar-section" aria-label="Vista">
-          <div className="view-tabs" role="tablist" aria-label="Vista">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={view === 'list'}
-              className={`btn ${view === 'list' ? '' : 'btn-ghost'}`}
-              onClick={() => setView('list')}
-            >
-              Lista
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={view === 'kanban'}
-              className={`btn ${view === 'kanban' ? '' : 'btn-ghost'}`}
-              onClick={() => setView('kanban')}
-            >
-              Kanban
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={view === 'dashboard'}
-              className={`btn ${view === 'dashboard' ? '' : 'btn-ghost'}`}
-              onClick={() => setView('dashboard')}
-            >
-              Dashboard
-            </button>
-          </div>
+        <section className="sidebar-section" aria-label="Acciones">
           <button className="btn btn-secondary" onClick={() => loadTickets(true)} disabled={refreshing}>
             {refreshing ? (
               <>
@@ -1046,7 +1013,7 @@ export default function App() {
       </aside>
 
       <main className="main">
-        {listError && view === 'list' && (
+        {listError && (
           <div className="alert" role="alert">
             {listError}
             <button
@@ -1059,55 +1026,38 @@ export default function App() {
           </div>
         )}
 
-        {view === 'dashboard' ? (
-          <DashboardView
-            tickets={tickets}
-            projectName={activeProject?.name ?? null}
-            statusFilter={statusFilter}
-            priorityFilter={priorityFilter}
-            loading={loading}
-            error={listError || null}
-            onRefresh={() => loadTickets(true)}
-          />
-        ) : view === 'kanban' ? (
-          <KanbanBoard
-            tickets={tickets
-              .filter((t) => {
-                if (priorityFilter !== 'all' && t.priority !== priorityFilter) return false;
-                const q = search.trim().toLowerCase();
-                if (!q) return true;
-                return [t.title, t.description, t.category, t.type, t.status, t.priority, t.created_by_name, t.id]
-                  .filter(Boolean)
-                  .join(' ')
-                  .toLowerCase()
-                  .includes(q);
-              })
-              .sort((a, b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')))}
-            onTicketClick={openTicket}
-            onStatusChange={(id, next) => changeTicketStatus(id, next)}
-          />
+        {!projectId ? (
+          <div className="empty">
+            <h3>Elegí un proyecto</h3>
+            <p>Seleccioná uno en el panel de la izquierda para ver sus tickets.</p>
+          </div>
+        ) : loading ? (
+          <div className="empty" role="status">
+            <h3>Cargando tickets…</h3>
+            <p>Un momento mientras traigo los últimos cambios del servidor.</p>
+          </div>
         ) : (
           <>
-            <div className="view-head">
+            <header className="app-head">
               <div>
-                <h2 className="view-title">Tickets</h2>
-                <p className="view-sub">
+                <h1 className="app-title">Bandeja de tickets</h1>
+                <p className="app-sub">
                   {activeProject?.name ?? 'Sin proyecto'} · {filtered.length} de {tickets.length}
                 </p>
               </div>
-              {search && <span className="query-hint">Buscando “{search}”</span>}
-            </div>
-            {!projectId ? (
-              <div className="empty">
-                <h3>Elegí un proyecto</h3>
-                <p>Seleccioná uno en el panel de la izquierda para ver sus tickets.</p>
+              <div className="kpi-chips">
+                {kpis.map((k) => (
+                  <div key={k.title} className={`kpi-chip kpi-chip--${k.tone}`}>
+                    <span className="kpi-chip-label">{k.title}</span>
+                    <span className="kpi-chip-value">{k.value}</span>
+                  </div>
+                ))}
               </div>
-            ) : loading ? (
-              <div className="empty" role="status">
-                <h3>Cargando tickets…</h3>
-                <p>Un momento mientras traigo los últimos cambios del servidor.</p>
-              </div>
-            ) : filtered.length === 0 ? (
+            </header>
+
+            {search && <span className="query-hint">Buscando “{search}”</span>}
+
+            {filtered.length === 0 ? (
               <div className="empty">
                 <h3>No hay tickets para mostrar</h3>
                 <p>
@@ -1130,83 +1080,11 @@ export default function App() {
                 )}
               </div>
             ) : (
-              <div className="list">
-                {filtered.map((t) => (
-                  <article
-                    key={t.id}
-                    className="ticket-card"
-                    data-priority={t.priority ?? 'none'}
-                    aria-current={selected?.id === t.id ? true : undefined}
-                    onClick={() => openTicket(t)}
-                  >
-                    <div className="ticket-card-top">
-                      <div className="ticket-badges">
-                        <Badge
-                          kind="status"
-                          value={t.status}
-                        >
-                          {(safeGet(STATUS_LABEL, t.status) ?? t.status) || 'Sin estado'}
-                        </Badge>
-                        <Badge kind="priority" value={t.priority}>
-                          {(safeGet(PRIORITY_LABEL, t.priority) ?? t.priority) || 'Sin prioridad'}
-                        </Badge>
-                        <Badge kind="type" value={t.type}>
-                          {(safeGet(TYPE_LABEL, t.type) ?? t.type) || 'Sin tipo'}
-                        </Badge>
-                      </div>
-                      <time className="ticket-date" dateTime={t.updated_at || t.created_at}>
-                        {formatDate(t.updated_at || t.created_at)}
-                      </time>
-                    </div>
-                    <h3 className="ticket-title">
-                      <button
-                        type="button"
-                        className="ticket-title-link"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openTicket(t);
-                        }}
-                      >
-                        {t.title || 'Sin título'}
-                      </button>
-                    </h3>
-                    <p className="ticket-desc">
-                      {(t.description || '(sin descripción)').slice(0, 180)}
-                      {(t.description || '').length > 180 ? '…' : ''}
-                    </p>
-                    <div className="ticket-card-foot">
-                      <span className="ticket-meta">
-                        {t.category || 'Sin categoría'} · {t.created_by_name || 'operador'}
-                      </span>
-                      <div className="ticket-quick-actions" onClick={(e) => e.stopPropagation()}>
-                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => openTicket(t)}>
-                          Abrir
-                        </button>
-                        {t.status !== 'en_progreso' && t.status !== 'cerrado' && (
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => changeTicketStatus(t.id, 'en_progreso')}
-                            disabled={updating}
-                          >
-                            Tomar
-                          </button>
-                        )}
-                        {t.status !== 'resuelto' && t.status !== 'cerrado' && (
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => changeTicketStatus(t.id, 'resuelto')}
-                            disabled={updating}
-                          >
-                            Resolver
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </article>
-                ))}
-              </div>
+              <KanbanBoard
+                tickets={filtered}
+                onTicketClick={openTicket}
+                onStatusChange={(id, next) => changeTicketStatus(id, next)}
+              />
             )}
           </>
         )}
@@ -1454,16 +1332,11 @@ export default function App() {
       )}
 
       {confirmPending && (
-        <div className="modal-overlay" onClick={() => setConfirmPending(null)}>
-          <div
-            className="modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Confirmar eliminación de ticket"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="modal-head">
-              <h2 className="modal-title">Eliminar ticket</h2>
+        <>
+          <div className="drawer-backdrop" onClick={() => setConfirmPending(null)} />
+          <div className="drawer" onClick={(e) => e.stopPropagation()}>
+            <div className="drawer-head">
+              <h2 className="drawer-title">Eliminar ticket</h2>
               <button
                 className="icon-btn"
                 onClick={() => setConfirmPending(null)}
@@ -1472,32 +1345,32 @@ export default function App() {
                 ✕
               </button>
             </div>
-            <p>
-              ¿Estás seguro de que querés eliminar el ticket{' '}
-              <strong>{confirmPending.title || 'sin título'}</strong>?
-            </p>
-            {modalError && (
-              <div className="alert" role="alert" style={{ marginTop: 'var(--space-3)' }}>
-                {modalError}
+            <div className="drawer-body">
+              <p>
+                ¿Estás seguro de que querés eliminar el ticket{' '}
+                <strong>{confirmPending.title || 'sin título'}</strong>?
+              </p>
+              {modalError && (
+                <div className="alert" role="alert">{modalError}</div>
+              )}
+              <div className="modal-actions">
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => setConfirmPending(null)}
+                >
+                  Cancelar
+                </button>
+                <button
+                  className="btn btn-danger"
+                  onClick={confirmDelete}
+                  disabled={deleting}
+                >
+                  {deleting ? 'Eliminando…' : 'Eliminar'}
+                </button>
               </div>
-            )}
-            <div className="modal-actions">
-              <button
-                className="btn btn-ghost"
-                onClick={() => setConfirmPending(null)}
-              >
-                Cancelar
-              </button>
-              <button
-                className="btn btn-danger"
-                onClick={confirmDelete}
-                disabled={deleting}
-              >
-                {deleting ? 'Eliminando…' : 'Eliminar'}
-              </button>
             </div>
           </div>
-        </div>
+        </>
       )}
 
       {lightbox && (

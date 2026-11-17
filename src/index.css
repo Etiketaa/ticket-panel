@@ -739,6 +739,122 @@ textarea.input { padding: var(--space-2) var(--space-3); line-height: var(--lead
   flex-wrap: wrap;
 }
 
+/* Cabecera unificada de la bandeja (sustituye a las pestañas) */
+.app-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  margin-bottom: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.app-title {
+  font-size: var(--font-xl);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+}
+
+.app-sub {
+  color: var(--text-muted);
+  font-size: var(--font-md);
+  margin-top: 2px;
+}
+
+.kpi-chips {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.kpi-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  min-width: 110px;
+}
+
+.kpi-chip-label {
+  font-size: var(--font-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.kpi-chip-value {
+  font-size: var(--font-xl);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-chip--accent .kpi-chip-value { color: var(--neon-primary); }
+.kpi-chip--success .kpi-chip-value { color: var(--success); }
+.kpi-chip--danger .kpi-chip-value { color: var(--danger); }
+.kpi-chip--warning .kpi-chip-value { color: var(--prio-media); }
+
+/* Drawer lateral derecho (detalle del ticket) */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: var(--scrim);
+}
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 60;
+  width: min(420px, 92vw);
+  height: 100svh;
+  background: var(--surface);
+  border-left: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.drawer-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.drawer-title {
+  font-size: var(--font-lg);
+  font-weight: 700;
+  line-height: var(--leading-snug);
+}
+
+.drawer-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  overflow-y: auto;
+  flex: 1;
+}
+
+.drawer-foot {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+  background: var(--surface-elevated);
+  flex-shrink: 0;
+}
+
 .comments-title {
   color: var(--text);
   font-size: var(--font-md);
